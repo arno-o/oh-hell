@@ -3,8 +3,6 @@ export const CARD_HEIGHT = 52;
 export const CARD_BACK_FRAME = 52;
 
 export const ASSET_KEYS = {
-    TITLE: 'TITLE',
-    CLICK_TO_START: 'CLICK_TO_START',
     CARDS: 'CARDS'
 } as const;
 
