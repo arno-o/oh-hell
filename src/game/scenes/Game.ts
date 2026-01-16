@@ -1,6 +1,7 @@
 import { Scene } from 'phaser';
-import { createDrawPile } from '@/lib/ui';
+import { createDrawPile, createPlayerUI } from '@/lib/ui';
 import { Card, createDeck, shuffleDeck } from '@/lib/deck';
+import { myPlayer } from 'playroomkit';
 
 export class Game extends Scene
 {
@@ -12,7 +13,12 @@ export class Game extends Scene
     create ()
     {
         this.cameras.main.setBackgroundColor('#074924');
-        createDrawPile(this);
+        this.runGameSetup(this);
         this.deck = shuffleDeck(createDeck());
+    }
+
+    runGameSetup(scene: Phaser.Scene): void {
+        createDrawPile(scene);
+        createPlayerUI(scene, myPlayer());
     }
 }
