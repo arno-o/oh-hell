@@ -20,8 +20,9 @@ export class Preloader extends Scene
             frameHeight: CARD_HEIGHT,
         });
 
-        this.load.image('icon-settings', 'icon-settings.png');
+        this.load.image('title', 'title.png');
         this.load.image('icon-chat', 'icon-chat.png');
+        this.load.image('icon-settings', 'icon-settings.png');
     }
 
     create ()

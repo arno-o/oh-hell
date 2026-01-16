@@ -31,6 +31,8 @@ export function createPlayerUI(scene: Phaser.Scene, player: PlayerState): void {
     scene.add.circle(30, scene.scale.height - (height + 50), profileImageRadius).setOrigin(0, 0).setFillStyle(0x000000, .5).setStrokeStyle(8, player.getProfile().color.hex);
 
     scene.add.text((profileImageRadius*2) + 50, scene.scale.height - 55, `Player: ${player.getProfile().name}`, { fontSize: '2.5vh' });
+
+    createTitle(scene);
 }
 
 function loadAvatar(scene: Phaser.Scene, url: string, key: string, x: number, y: number, size: number) {
@@ -114,4 +116,9 @@ export function createMenuButtons(scene: Phaser.Scene) {
 
         x += buttonSize + spacing;
     });
+}
+
+function createTitle(scene: Phaser.Scene) {
+    const offset = 20;
+    scene.add.image(offset, offset, 'title').setOrigin(0, 0).setScale(0.4);
 }
