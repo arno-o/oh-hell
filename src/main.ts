@@ -13,7 +13,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                     // Initial params if needed
                     score: 0
                 }
-            }
+            },
+            skipLobby: true // for developing only
         });
         
         StartGame('game-container');
