@@ -1,7 +1,7 @@
 import { Scene } from 'phaser';
-import { createDrawPile, createPlayerUI, createMenuButtons } from '@/lib/ui';
+import { createDrawPile, createPlayerUI, createMenuButtons, createOtherPlayersUI } from '@/lib/ui';
 import { Card, createDeck, shuffleDeck } from '@/lib/deck';
-import { myPlayer } from 'playroomkit';
+import { getParticipants, myPlayer } from 'playroomkit';
 
 export class Game extends Scene
 {
@@ -19,7 +19,9 @@ export class Game extends Scene
 
     runGameSetup(scene: Phaser.Scene): void {
         createDrawPile(scene);
-        createPlayerUI(scene, myPlayer());
+        const localPlayer = myPlayer();
+        createPlayerUI(scene, localPlayer);
+        createOtherPlayersUI(scene, Object.values(getParticipants()), localPlayer.id);
         createMenuButtons(scene);
     }
 }

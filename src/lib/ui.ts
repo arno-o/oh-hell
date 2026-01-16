@@ -22,17 +22,93 @@ function createCard(scene: Phaser.Scene, x: number, y: number): Phaser.GameObjec
 }
 
 export function createPlayerUI(scene: Phaser.Scene, player: PlayerState): void {
-    const height = 80;
+    const barHeight = 80;
     const profileImageRadius = 50;
+    const avatarSize = profileImageRadius * 2;
+    const barY = scene.scale.height - barHeight;
+    const avatarX = 30;
+    const avatarY = barY - (profileImageRadius + 20);
 
-    scene.add.rectangle(0, scene.scale.height - height, scene.scale.width, height).setOrigin(0, 0).setFillStyle(0x002200, 1);
+    scene.add.rectangle(0, barY, scene.scale.width, barHeight).setOrigin(0, 0).setFillStyle(0x002200, 1);
 
-    loadAvatar(scene, player.getProfile().photo, `avatar-${player.id}`, 30, scene.scale.height - (height + 50), profileImageRadius * 2);
-    scene.add.circle(30, scene.scale.height - (height + 50), profileImageRadius).setOrigin(0, 0).setFillStyle(0x000000, .5).setStrokeStyle(8, player.getProfile().color.hex);
+    loadAvatar(scene, player.getProfile().photo, `avatar-${player.id}`, avatarX, avatarY, avatarSize);
+    scene
+        .add.circle(avatarX, avatarY, profileImageRadius)
+        .setOrigin(0, 0)
+        .setFillStyle(0x000000, 0.5)
+        .setStrokeStyle(8, player.getProfile().color.hex);
 
-    scene.add.text((profileImageRadius*2) + 50, scene.scale.height - 55, `Player: ${player.getProfile().name}`, { fontSize: '2.5vh' });
+    scene.add.text(avatarSize + 50, barY + 25, `Player: ${player.getProfile().name}`, { fontSize: '2.5vh' });
 
     createTitle(scene);
+}
+
+export function createOtherPlayersUI(scene: Phaser.Scene, players: PlayerState[], localPlayerId: string): void {
+    const others = players.filter((player) => player.id !== localPlayerId).slice(0, 3);
+    const positions: Array<'left' | 'top' | 'right'> = ['left', 'top', 'right'];
+
+    others.forEach((player, index) => {
+        const position = positions[index];
+        if (position) {
+            createSidePlayerUI(scene, player, position);
+        }
+    });
+}
+
+function createSidePlayerUI(scene: Phaser.Scene, player: PlayerState, position: 'left' | 'top' | 'right'): void {
+    const profileImageRadius = 32;
+    const avatarSize = profileImageRadius * 2;
+    const margin = 30;
+    const labelSpacing = 8;
+
+    let x = margin;
+    let y = margin;
+    let nameX = margin + avatarSize + 12;
+    let nameY = margin + profileImageRadius - 10;
+
+    if (position === 'left') {
+        x = margin;
+        y = scene.scale.height / 2 - profileImageRadius;
+        nameX = x + avatarSize + 12;
+        nameY = y + profileImageRadius - 10;
+    }
+
+    if (position === 'right') {
+        x = scene.scale.width - margin - avatarSize;
+        y = scene.scale.height / 2 - profileImageRadius;
+        nameX = x - 12;
+        nameY = y + profileImageRadius - 10;
+    }
+
+    if (position === 'top') {
+        x = scene.scale.width / 2 - profileImageRadius;
+        y = margin;
+        nameX = x + profileImageRadius;
+        nameY = y + avatarSize + labelSpacing;
+    }
+
+    loadAvatar(scene, player.getProfile().photo, `avatar-${player.id}`, x, y, avatarSize);
+    scene
+        .add.circle(x, y, profileImageRadius)
+        .setOrigin(0, 0)
+        .setFillStyle(0x000000, 0.5)
+        .setStrokeStyle(6, player.getProfile().color.hex);
+
+    const nameStyle: Phaser.Types.GameObjects.Text.TextStyle = {
+        fontSize: '18px',
+        color: '#ffffff',
+        align: 'center'
+    };
+
+    const name = scene.add.text(nameX, nameY, player.getProfile().name, nameStyle);
+
+    if (position === 'right') {
+        name.setOrigin(1, 0.5);
+    } else if (position === 'top') {
+        name.setOrigin(0.5, 0);
+    } else {
+        name.setOrigin(0, 0.5);
+    }
 }
 
 function loadAvatar(scene: Phaser.Scene, url: string, key: string, x: number, y: number, size: number) {
