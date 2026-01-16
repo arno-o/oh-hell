@@ -28,7 +28,7 @@ export function createPlayerUI(scene: Phaser.Scene, player: PlayerState): void {
     scene.add.rectangle(0, scene.scale.height - height, scene.scale.width, height).setOrigin(0, 0).setFillStyle(0x002200, 1);
 
     loadAvatar(scene, player.getProfile().photo, `avatar-${player.id}`, 30, scene.scale.height - (height + 50), profileImageRadius * 2);
-    scene.add.circle(30, scene.scale.height - (height + 50), profileImageRadius).setOrigin(0, 0).setFillStyle(0x000000, .5).setStrokeStyle(4, 0x000000);
+    scene.add.circle(30, scene.scale.height - (height + 50), profileImageRadius).setOrigin(0, 0).setFillStyle(0x000000, .5).setStrokeStyle(8, player.getProfile().color.hex);
 
     scene.add.text((profileImageRadius*2) + 50, scene.scale.height - 55, `Player: ${player.getProfile().name}`, { fontSize: '2.5vh' });
 }
