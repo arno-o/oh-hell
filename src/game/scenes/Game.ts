@@ -1,5 +1,5 @@
 import { Scene } from 'phaser';
-import { createDrawPile, createPlayerUI } from '@/lib/ui';
+import { createDrawPile, createPlayerUI, createMenuButtons } from '@/lib/ui';
 import { Card, createDeck, shuffleDeck } from '@/lib/deck';
 import { myPlayer } from 'playroomkit';
 
@@ -20,5 +20,6 @@ export class Game extends Scene
     runGameSetup(scene: Phaser.Scene): void {
         createDrawPile(scene);
         createPlayerUI(scene, myPlayer());
+        createMenuButtons(scene);
     }
 }

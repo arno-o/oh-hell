@@ -1,3 +1,22 @@
+export interface MenuItem {
+    icon: string;
+    label: string;
+    action: () => void;
+}
+
+export const MENU_ITEMS: MenuItem[] = [
+    {
+        icon: 'icon-chat',
+        label: 'Chat',
+        action: () => console.log('Chat clicked'),
+    },
+    {
+        icon: 'icon-settings',
+        label: 'Settings',
+        action: () => console.log('Settings clicked'),
+    },
+];
+
 export const CARD_WIDTH = 37;
 export const CARD_HEIGHT = 52;
 export const CARD_SCALE = 2.5;
