@@ -11,6 +11,7 @@ export type PlayerAnchor = {
     x: number;
     y: number;
     position: PlayerAnchorPosition;
+    turnHighlight?: Phaser.GameObjects.Graphics;
 };
 
 // -- draw pile
@@ -144,78 +145,137 @@ export function createOtherPlayersUI(scene: Phaser.Scene, players: PlayerState[]
 function createSidePlayerUI(scene: Phaser.Scene, player: PlayerState, position: 'left' | 'top' | 'right'): PlayerAnchor {
     const profileImageRadius = 32;
     const avatarSize = profileImageRadius * 2;
-    const margin = 30;
-    const labelSpacing = 8;
+    const margin = 28;
+    const panelPadding = 14;
+    const panelWidth = position === 'top' ? 260 : 220;
+    const panelHeight = 88;
 
-    let x = margin;
-    let y = margin;
-    let nameX = margin + avatarSize + 12;
-    let nameY = margin + profileImageRadius - 10;
+    let panelX = margin;
+    let panelY = margin;
 
     if (position === 'left') {
-        x = margin;
-        y = scene.scale.height / 2 - profileImageRadius;
-        nameX = x + avatarSize + 12;
-        nameY = y + profileImageRadius - 10;
+        panelX = margin;
+        panelY = scene.scale.height / 2 - panelHeight / 2;
     }
 
     if (position === 'right') {
-        x = scene.scale.width - margin - avatarSize;
-        y = scene.scale.height / 2 - profileImageRadius;
-        nameX = x - 12;
-        nameY = y + profileImageRadius - 10;
+        panelX = scene.scale.width - margin - panelWidth;
+        panelY = scene.scale.height / 2 - panelHeight / 2;
     }
 
     if (position === 'top') {
-        x = scene.scale.width / 2 - profileImageRadius;
-        y = margin;
-        nameX = x + profileImageRadius;
-        nameY = y + avatarSize + labelSpacing;
+        panelX = scene.scale.width / 2 - panelWidth / 2;
+        panelY = margin;
     }
 
-    loadAvatar(scene, player.getProfile().photo, `avatar-${player.id}`, x, y, avatarSize);
+    const shadow = scene.add.graphics();
+    shadow.fillStyle(0x000000, 0.25);
+    shadow.fillRoundedRect(panelX + 2, panelY + 4, panelWidth, panelHeight, 14);
+
+    const panel = scene.add.graphics();
+    panel.fillStyle(0x1c1f26, 0.95);
+    panel.lineStyle(2, player.getProfile().color.hex, 0.9);
+    panel.fillRoundedRect(panelX, panelY, panelWidth, panelHeight, 14);
+    panel.strokeRoundedRect(panelX, panelY, panelWidth, panelHeight, 14);
+
+    const highlight = scene.add.graphics();
+    highlight.fillStyle(0xffffff, 0.08);
+    highlight.fillRoundedRect(panelX + 2, panelY + 2, panelWidth - 4, 18, 12);
+
+    const avatarX = panelX + panelPadding;
+    const avatarY = panelY + (panelHeight - avatarSize) / 2;
+
+    loadAvatar(scene, player.getProfile().photo, `avatar-${player.id}`, avatarX, avatarY, avatarSize);
     scene
-        .add.circle(x, y, profileImageRadius)
+        .add.circle(avatarX, avatarY, profileImageRadius)
         .setOrigin(0, 0)
-        .setFillStyle(0x000000, 0.5)
-        .setStrokeStyle(6, player.getProfile().color.hex);
+        .setFillStyle(0x000000, 0.55)
+        .setStrokeStyle(5, player.getProfile().color.hex);
 
     const nameStyle: Phaser.Types.GameObjects.Text.TextStyle = {
-        fontSize: '18px',
+        fontSize: '16px',
         color: '#ffffff',
-        align: 'center'
+        fontStyle: 'bold'
     };
 
-    const name = scene.add.text(nameX, nameY, player.getProfile().name, nameStyle);
+    const baseTextX = avatarX + avatarSize + 12;
+    const profile = player.getProfile();
+    const isBot = Boolean((profile as { isBot?: boolean }).isBot ?? (player as { isBot?: boolean }).isBot ?? /bot/i.test(profile.name));
+    const botBadgeWidth = 36;
+    const botBadgeHeight = 16;
+    const botBadgeX = baseTextX;
+    const nameY = panelY + 18;
+    const nameX = isBot ? baseTextX + botBadgeWidth + 8 : baseTextX;
 
-    if (position === 'right') {
-        name.setOrigin(1, 0.5);
-    } else if (position === 'top') {
-        name.setOrigin(0.5, 0);
-    } else {
-        name.setOrigin(0, 0.5);
+    if (isBot) {
+        const botBadgeBg = scene.add.graphics();
+        botBadgeBg.fillStyle(0xffd24a, 1);
+        botBadgeBg.fillRoundedRect(botBadgeX, nameY + 2, botBadgeWidth, botBadgeHeight, 6);
+        scene.add.text(botBadgeX + botBadgeWidth / 2, nameY + 2 + botBadgeHeight / 2, 'BOT', {
+            fontSize: '10px',
+            color: '#1a1a1a',
+            fontStyle: 'bold'
+        }).setOrigin(0.5);
     }
+
+    const name = scene.add.text(nameX, nameY, profile.name, nameStyle);
+    name.setOrigin(0, 0);
+
+    const bidLabelX = baseTextX;
+    const bidLabelY = panelY + panelHeight - 26;
+    const bidLabel = scene.add.text(bidLabelX, bidLabelY, 'BID', {
+        fontSize: '11px',
+        color: '#9aa0a6',
+        fontStyle: 'bold'
+    });
+    bidLabel.setOrigin(0, 0.5);
+
+    const bidValue = '--';
+    const bidText = scene.add.text(0, bidLabelY, bidValue, {
+        fontSize: '14px',
+        color: '#ffffff',
+        fontStyle: 'bold'
+    });
+    bidText.setOrigin(0.5, 0.5);
+
+    const bidBgWidth = 40;
+    const bidBgHeight = 20;
+    const bidBgX = bidLabelX + 28;
+    const bidBgY = bidLabelY - bidBgHeight / 2;
+    const bidBg = scene.add.graphics();
+    bidBg.fillStyle(0x2a2f3a, 1);
+    bidBg.fillRoundedRect(bidBgX, bidBgY, bidBgWidth, bidBgHeight, 8);
+
+    bidText.setX(bidBgX + bidBgWidth / 2);
+
+    const turnHighlight = scene.add.graphics();
+    turnHighlight.lineStyle(3, 0xf7d560, 0.9);
+    turnHighlight.strokeRoundedRect(panelX - 2, panelY - 2, panelWidth + 4, panelHeight + 4, 16);
+    turnHighlight.setAlpha(0);
 
     if (position === 'left') {
         return {
-            x: x + avatarSize + 22,
-            y: y + profileImageRadius - 10,
-            position: 'left'
+            x: panelX + panelWidth + 16,
+            y: panelY + panelHeight / 2,
+            position: 'left',
+            turnHighlight
         };
     }
 
     if (position === 'right') {
         return {
-            x: x - 22,
-            y: y + profileImageRadius - 10,
-            position: 'right'
+            x: panelX - 16,
+            y: panelY + panelHeight / 2,
+            position: 'right',
+            turnHighlight
         };
     }
 
     return {
-        x: x + profileImageRadius,
-        y: y + avatarSize + 18,
-        position: 'top'
+        x: panelX + panelWidth / 2,
+        y: panelY + panelHeight + 16,
+        position: 'top',
+        turnHighlight
     };
 }
 
