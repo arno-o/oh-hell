@@ -1,9 +1,25 @@
-import { ASSET_KEYS, CARD_BACK_FRAME, CARD_SCALE } from '@/lib/common';
+import { ASSET_KEYS, CARD_BACK_FRAME, CARD_HEIGHT, CARD_SCALE, CARD_WIDTH } from '@/lib/common';
 import { PlayerState } from 'playroomkit';
 import { MENU_ITEMS } from '@/lib/common';
+import { Card } from '@/lib/card';
+import { getCardFrame } from '@/lib/deck';
+import { CardSprite } from '@/lib/cardSprite';
+
+export type PlayerAnchorPosition = 'bottom' | 'left' | 'top' | 'right';
+
+export type PlayerAnchor = {
+    x: number;
+    y: number;
+    position: PlayerAnchorPosition;
+};
 
 // -- draw pile
-export function createDrawPile(scene: Phaser.Scene): Phaser.GameObjects.Image[] {
+export function createDrawPile(scene: Phaser.Scene, onDraw?: () => void): {
+    drawPileCards: Phaser.GameObjects.Image[];
+    drawButton: Phaser.GameObjects.Text;
+    pileX: number;
+    pileY: number;
+} {
     const drawPileCards: Phaser.GameObjects.Image[] = [];
     const centerX = scene.scale.width / 2;
     const centerY = scene.scale.height / 2;
@@ -12,16 +28,79 @@ export function createDrawPile(scene: Phaser.Scene): Phaser.GameObjects.Image[] 
         drawPileCards.push(createCard(scene, centerX + i * 10, centerY));
     }
 
-    createButton(scene, centerX, centerY + 100, "Draw cards", () => alert("Draw cards"));
+    const drawButton = createButton(scene, centerX, centerY + 100, "Draw cards", () => onDraw?.());
 
-    return drawPileCards;
+    return { drawPileCards, drawButton, pileX: centerX, pileY: centerY };
+}
+
+export function renderPlayerHand(
+    scene: Phaser.Scene,
+    cards: Card[],
+    previous: CardSprite[] = [],
+    options?: { from?: { x: number; y: number }; staggerMs?: number }
+): CardSprite[] {
+    previous.forEach((sprite) => sprite.destroy());
+
+    if (!cards.length) {
+        return [];
+    }
+
+    const centerX = scene.scale.width / 2;
+    const handY = scene.scale.height - 140;
+    const spacing = Math.min(CARD_WIDTH * CARD_SCALE * 1, 60);
+    const totalWidth = spacing * (cards.length - 1);
+    const startX = centerX - totalWidth / 2;
+    const fanAngle = 12;
+    const angleStep = cards.length > 1 ? fanAngle / (cards.length - 1) : 0;
+
+    const from = options?.from;
+    const staggerMs = options?.staggerMs ?? 60;
+
+    return cards.map((card, index) => {
+        const x = startX + spacing * index;
+        const startXPos = from?.x ?? x;
+        const startYPos = from?.y ?? handY;
+        const angle = -fanAngle / 2 + angleStep * index;
+        const sprite = new CardSprite(scene, startXPos, startYPos, ASSET_KEYS.CARDS, getCardFrame(card), card, CARD_SCALE);
+
+        sprite.originalAngle = angle;
+        sprite.setAngle(from ? 0 : angle);
+        sprite.setOriginalDepth(index);
+
+        if (!from) {
+            sprite.originalX = x;
+            sprite.originalY = handY;
+        }
+
+        sprite.enableInteractions();
+
+        if (from) {
+            scene.tweens.add({
+                targets: sprite,
+                x,
+                y: handY,
+                angle,
+                duration: 350,
+                delay: index * staggerMs,
+                ease: 'Cubic.easeOut',
+                onComplete: () => {
+                    sprite.originalX = x;
+                    sprite.originalY = handY;
+                    sprite.originalAngle = angle;
+                    sprite.setOriginalDepth(index);
+                }
+            });
+        }
+
+        return sprite;
+    });
 }
 
 function createCard(scene: Phaser.Scene, x: number, y: number): Phaser.GameObjects.Image {
     return scene.add.image(x - 10, y, ASSET_KEYS.CARDS, CARD_BACK_FRAME).setOrigin(0.5).setScale(CARD_SCALE);
 }
 
-export function createPlayerUI(scene: Phaser.Scene, player: PlayerState): void {
+export function createPlayerUI(scene: Phaser.Scene, player: PlayerState): PlayerAnchor {
     const barHeight = 80;
     const profileImageRadius = 50;
     const avatarSize = profileImageRadius * 2;
@@ -40,22 +119,29 @@ export function createPlayerUI(scene: Phaser.Scene, player: PlayerState): void {
 
     scene.add.text(avatarSize + 50, barY + 25, `Player: ${player.getProfile().name}`, { fontSize: '2.5vh' });
 
-    createTitle(scene);
+    return {
+        x: avatarX + avatarSize + 80,
+        y: barY - 22,
+        position: 'bottom'
+    };
 }
 
-export function createOtherPlayersUI(scene: Phaser.Scene, players: PlayerState[], localPlayerId: string): void {
+export function createOtherPlayersUI(scene: Phaser.Scene, players: PlayerState[], localPlayerId: string): Record<string, PlayerAnchor> {
     const others = players.filter((player) => player.id !== localPlayerId).slice(0, 3);
     const positions: Array<'left' | 'top' | 'right'> = ['left', 'top', 'right'];
+    const anchors: Record<string, PlayerAnchor> = {};
 
     others.forEach((player, index) => {
         const position = positions[index];
         if (position) {
-            createSidePlayerUI(scene, player, position);
+            anchors[player.id] = createSidePlayerUI(scene, player, position);
         }
     });
+
+    return anchors;
 }
 
-function createSidePlayerUI(scene: Phaser.Scene, player: PlayerState, position: 'left' | 'top' | 'right'): void {
+function createSidePlayerUI(scene: Phaser.Scene, player: PlayerState, position: 'left' | 'top' | 'right'): PlayerAnchor {
     const profileImageRadius = 32;
     const avatarSize = profileImageRadius * 2;
     const margin = 30;
@@ -109,6 +195,28 @@ function createSidePlayerUI(scene: Phaser.Scene, player: PlayerState, position: 
     } else {
         name.setOrigin(0, 0.5);
     }
+
+    if (position === 'left') {
+        return {
+            x: x + avatarSize + 22,
+            y: y + profileImageRadius - 10,
+            position: 'left'
+        };
+    }
+
+    if (position === 'right') {
+        return {
+            x: x - 22,
+            y: y + profileImageRadius - 10,
+            position: 'right'
+        };
+    }
+
+    return {
+        x: x + profileImageRadius,
+        y: y + avatarSize + 18,
+        position: 'top'
+    };
 }
 
 function loadAvatar(scene: Phaser.Scene, url: string, key: string, x: number, y: number, size: number) {
@@ -194,7 +302,190 @@ export function createMenuButtons(scene: Phaser.Scene) {
     });
 }
 
-function createTitle(scene: Phaser.Scene) {
-    const offset = 20;
-    scene.add.image(offset, offset, 'title').setOrigin(0, 0).setScale(0.4);
+export function createBidBubble(
+    scene: Phaser.Scene,
+    anchor: PlayerAnchor,
+    bid: number,
+    existing?: Phaser.GameObjects.Container
+): Phaser.GameObjects.Container {
+    existing?.destroy();
+
+    const width = 56;
+    const height = 32;
+    const tailSize = 8;
+    const container = scene.add.container(anchor.x, anchor.y);
+    const bg = scene.add.graphics();
+
+    bg.fillStyle(0xffffff, 1);
+    bg.lineStyle(2, 0x333333, 1);
+    bg.fillRoundedRect(-width / 2, -height / 2, width, height, 8);
+    bg.strokeRoundedRect(-width / 2, -height / 2, width, height, 8);
+
+    if (anchor.position === 'bottom') {
+        bg.fillTriangle(0, height / 2, -tailSize, height / 2 + tailSize, tailSize, height / 2 + tailSize);
+    } else if (anchor.position === 'top') {
+        bg.fillTriangle(0, -height / 2, -tailSize, -height / 2 - tailSize, tailSize, -height / 2 - tailSize);
+    } else if (anchor.position === 'left') {
+        bg.fillTriangle(-width / 2, 0, -width / 2 - tailSize, -tailSize, -width / 2 - tailSize, tailSize);
+    } else {
+        bg.fillTriangle(width / 2, 0, width / 2 + tailSize, -tailSize, width / 2 + tailSize, tailSize);
+    }
+
+    const text = scene.add.text(0, 0, `${bid}`, {
+        fontSize: '16px',
+        color: '#111'
+    }).setOrigin(0.5);
+
+    container.add([bg, text]);
+    container.setDepth(50);
+    return container;
+}
+
+export function createBidModal(
+    scene: Phaser.Scene,
+    maxBid: number,
+    onSelect: (bid: number) => void
+): Phaser.GameObjects.Container {
+    const container = scene.add.container(0, 0);
+    const overlay = scene.add.rectangle(0, 0, scene.scale.width, scene.scale.height, 0x000000, 0.5)
+        .setOrigin(0, 0)
+        .setInteractive();
+
+    const panelWidth = Math.min(scene.scale.width * 0.8, 420);
+    const panelHeight = Math.min(scene.scale.height * 0.5, 280);
+    const panelX = scene.scale.width / 2 - panelWidth / 2;
+    const panelY = scene.scale.height / 2 - panelHeight / 2;
+
+    const panel = scene.add.graphics();
+    panel.fillStyle(0x222222, 0.95);
+    panel.fillRoundedRect(panelX, panelY, panelWidth, panelHeight, 12);
+
+    const title = scene.add.text(scene.scale.width / 2, panelY + 20, 'Place your bid', {
+        fontSize: '20px',
+        color: '#ffffff'
+    }).setOrigin(0.5, 0);
+
+    const buttons: Phaser.GameObjects.Text[] = [];
+    const padding = 16;
+    const buttonSize = 42;
+    const cols = Math.min(6, Math.max(2, maxBid));
+    const startX = scene.scale.width / 2 - ((cols - 1) * (buttonSize + padding)) / 2;
+    const startY = panelY + 70;
+
+    for (let bid = 1; bid <= maxBid; bid += 1) {
+        const index = bid - 1;
+        const col = index % cols;
+        const row = Math.floor(index / cols);
+        const x = startX + col * (buttonSize + padding);
+        const y = startY + row * (buttonSize + padding);
+
+        const button = scene.add.text(x, y, `${bid}`, {
+            fontSize: '18px',
+            color: '#ffffff',
+            backgroundColor: '#444444',
+            padding: { left: 12, right: 12, top: 8, bottom: 8 }
+        }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+
+        button.on('pointerdown', () => onSelect(bid));
+        button.on('pointerover', () => button.setStyle({ backgroundColor: '#666666' }));
+        button.on('pointerout', () => button.setStyle({ backgroundColor: '#444444' }));
+        buttons.push(button);
+    }
+
+    container.add([overlay, panel, title, ...buttons]);
+    container.setDepth(100);
+    return container;
+}
+
+export function createTurnText(scene: Phaser.Scene): Phaser.GameObjects.Text {
+    return scene.add.text(scene.scale.width / 2, 16, 'Turn: --', {
+        fontSize: '18px',
+        color: '#ffffff'
+    }).setOrigin(0.5, 0);
+}
+
+export function moveDrawPileToTopLeft(
+    scene: Phaser.Scene,
+    drawPileCards: Phaser.GameObjects.Image[]
+): { x: number; y: number } {
+    if (!drawPileCards.length) {
+        return { x: 0, y: 0 };
+    }
+
+    const margin = 24;
+    const cardWidth = CARD_WIDTH * CARD_SCALE;
+    const cardHeight = CARD_HEIGHT * CARD_SCALE;
+    const targetX = cardWidth / 2 + margin;
+    const targetY = cardHeight / 2 + margin;
+
+    drawPileCards.forEach((card, index) => {
+        scene.tweens.add({
+            targets: card,
+            x: targetX + (index * 10),
+            y: targetY,
+            duration: 300,
+            ease: 'Cubic.easeOut'
+        });
+    });
+
+    return { x: targetX, y: targetY };
+}
+
+export function renderTrumpCardNextToDeck(
+    scene: Phaser.Scene,
+    trumpCard: Card | null,
+    existing: CardSprite | undefined,
+    deckPosition: { x: number; y: number }
+): CardSprite | undefined {
+    if (!trumpCard) {
+        return existing;
+    }
+
+    existing?.destroy();
+
+    const margin = 24;
+    const cardWidth = CARD_WIDTH * CARD_SCALE;
+    const x = deckPosition.x + cardWidth + margin;
+    const y = deckPosition.y;
+
+    const sprite = new CardSprite(scene, x, y, ASSET_KEYS.CARDS, getCardFrame(trumpCard), trumpCard, CARD_SCALE);
+    sprite.setDepth(10);
+    return sprite;
+}
+
+export function renderTrickCards(
+    scene: Phaser.Scene,
+    cards: Card[],
+    previous: CardSprite[] = []
+): CardSprite[] {
+    previous.forEach((sprite) => sprite.destroy());
+
+    if (!cards.length) {
+        return [];
+    }
+
+    const centerX = scene.scale.width / 2;
+    const centerY = scene.scale.height / 2 - 10;
+    const offsets = [
+        { x: 0, y: -50, angle: 0 },
+        { x: -60, y: 0, angle: -8 },
+        { x: 60, y: 0, angle: 8 },
+        { x: 0, y: 60, angle: 0 }
+    ];
+
+    return cards.map((card, index) => {
+        const offset = offsets[index] ?? { x: index * 6, y: index * 6, angle: 0 };
+        const sprite = new CardSprite(
+            scene,
+            centerX + offset.x,
+            centerY + offset.y,
+            ASSET_KEYS.CARDS,
+            getCardFrame(card),
+            card,
+            CARD_SCALE
+        );
+        sprite.setAngle(offset.angle);
+        sprite.setDepth(20 + index);
+        return sprite;
+    });
 }

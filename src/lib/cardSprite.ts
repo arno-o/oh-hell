@@ -2,8 +2,9 @@ import { Scene } from 'phaser';
 import { Card } from '@/lib/card';
 import { getCardName } from '@/lib/deck';
 
-export const HOVER_LIFT = 40;
-export const HOVER_SCALE = 1.3;
+export const HOVER_LIFT = 20;
+export const HOVER_SCALE = 1;
+export const DRAG_SCALE = 1.2;
 export const ANIM_DURATION = 100;
 
 export class CardSprite extends Phaser.GameObjects.Sprite {
@@ -14,6 +15,7 @@ export class CardSprite extends Phaser.GameObjects.Sprite {
     public isHovered: boolean = false;
     public isDragging: boolean = false;
     public baseScale: number = 1;
+    private suppressHover: boolean = false;
 
     constructor(scene: Scene, x: number, y: number, texture: string, frame: string | number, cardData: Card, scale: number) {
         super(scene, x, y, texture, frame);
@@ -67,14 +69,23 @@ export class CardSprite extends Phaser.GameObjects.Sprite {
         this.on('pointerdown', this.onPointerDown, this);
     }
 
+    public markAsDisabled() {
+        this.isHovered = false;
+        this.isDragging = false;
+        this.disableInteractive();
+        this.removeAllListeners();
+
+        this.setTint(0x777777);
+    }
+
     private onPointerOver() {
-        if (!this.isDragging) {
+        if (!this.isDragging && !this.suppressHover) {
             this.isHovered = true;
             this.setDepth(1000);
             this.scene.tweens.add({
                 targets: this,
                 y: this.originalY - HOVER_LIFT * 1.5,
-                angle: Phaser.Math.Between(-6, 6), // Straighten card
+                angle: 0,
                 scaleX: this.baseScale * HOVER_SCALE,
                 scaleY: this.baseScale * HOVER_SCALE,
                 duration: ANIM_DURATION,
@@ -89,6 +100,7 @@ export class CardSprite extends Phaser.GameObjects.Sprite {
             this.setDepth(this.originalDepth); // We need to store original depth or manage it externally
             this.scene.tweens.add({
                 targets: this,
+                x: this.originalX,
                 y: this.originalY,
                 angle: this.originalAngle, // Return to fan angle
                 scaleX: this.baseScale,
@@ -101,12 +113,13 @@ export class CardSprite extends Phaser.GameObjects.Sprite {
 
     private onDragStart() {
         this.isDragging = true;
+        this.scene.tweens.killTweensOf(this);
         this.setDepth(1001);
         this.scene.tweens.add({
             targets: this,
             angle: 0, // Straighten while dragging
-            scaleX: this.baseScale * HOVER_SCALE,
-            scaleY: this.baseScale * HOVER_SCALE,
+            scaleX: this.baseScale * DRAG_SCALE,
+            scaleY: this.baseScale * DRAG_SCALE,
             duration: ANIM_DURATION,
             ease: 'Cubic.easeOut'
         });
@@ -119,6 +132,8 @@ export class CardSprite extends Phaser.GameObjects.Sprite {
 
     private onDragEnd() {
         this.isDragging = false;
+        this.isHovered = false;
+        this.scene.tweens.killTweensOf(this);
         
         // drop it on the pile to play the card
         const droppedInPlayZone = this.y < this.scene.cameras.main.height * 0.7;
@@ -131,18 +146,10 @@ export class CardSprite extends Phaser.GameObjects.Sprite {
     }
 
     public resetPosition() {
-        this.scene.tweens.add({
-            targets: this,
-            x: this.originalX,
-            y: this.isHovered ? this.originalY - HOVER_LIFT * 1.5 : this.originalY,
-            angle: this.isHovered ? 0 : this.originalAngle,
-            scaleX: this.isHovered ? this.baseScale * HOVER_SCALE : this.baseScale,
-            scaleY: this.isHovered ? this.baseScale * HOVER_SCALE : this.baseScale,
-            duration: ANIM_DURATION * 2,
-            ease: 'Back.easeOut'
-        });
-        
-        this.setDepth(this.isHovered ? 1000 : this.originalDepth);
+        this.setPosition(this.originalX, this.originalY);
+        this.setAngle(this.originalAngle);
+        this.setScale(this.baseScale);
+        this.setDepth(this.originalDepth);
     }
 
     private onPointerDown() {
