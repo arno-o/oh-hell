@@ -113,9 +113,16 @@ export class Game extends Scene
         if (currentTurnPlayerId && currentTurnPlayerId !== this.lastTurnPlayerId) {
             this.lastTurnPlayerId = currentTurnPlayerId;
             const localId = myPlayer().id;
-            const label = currentTurnPlayerId === localId ? 'Your turn' : `Turn: ${currentTurnPlayerId}`;
+            const players = getParticipants();
+            const currentPlayer = players[currentTurnPlayerId];
+            const displayName = currentPlayer?.getProfile().name ?? 'Unknown';
+            const label = currentTurnPlayerId === localId ? 'Your turn' : `Turn: ${displayName}`;
             this.turnText?.setText(label);
-            console.log('[Turn] Current player', currentTurnPlayerId);
+            console.log('[Turn] Current player', displayName);
+
+            Object.entries(this.playerAnchors).forEach(([playerId, anchor]) => {
+                anchor.turnHighlight?.setAlpha(playerId === currentTurnPlayerId ? 1 : 0);
+            });
         }
 
         const dealId = getState('dealId') ?? 0;
