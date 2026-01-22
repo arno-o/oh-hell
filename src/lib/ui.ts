@@ -128,16 +128,22 @@ export function createPlayerUI(scene: Phaser.Scene, player: PlayerState): Player
 }
 
 export function createOtherPlayersUI(scene: Phaser.Scene, players: PlayerState[], localPlayerId: string): Record<string, PlayerAnchor> {
-    const others = players.filter((player) => player.id !== localPlayerId).slice(0, 3);
-    const positions: Array<'left' | 'top' | 'right'> = ['left', 'top', 'right'];
-    const anchors: Record<string, PlayerAnchor> = {};
+    const allIds = players.map(p => p.id).sort();
+    const myIndex = allIds.indexOf(localPlayerId);
 
-    others.forEach((player, index) => {
-        const position = positions[index];
-        if (position) {
-            anchors[player.id] = createSidePlayerUI(scene, player, position, isBotPlayer(player));
+    const anchors: Record<string, PlayerAnchor> = {};
+    const positions: Array<'left' | 'top' | 'right'> = ['left', 'top', 'right'];
+
+    for (let i = 1; i < allIds.length; i++) {
+        const nextIndex = (myIndex + i) % allIds.length;
+        const pId = allIds[nextIndex];
+        const player = players.find(p => p.id === pId);
+        const pos = positions[i - 1];
+
+        if (player && pos) {
+            anchors[pId] = createSidePlayerUI(scene, player, pos, isBotPlayer(player));
         }
-    });
+    }
 
     return anchors;
 }

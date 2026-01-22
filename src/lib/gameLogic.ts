@@ -36,6 +36,11 @@ export class GameLogic {
         this.playerIds = playerIds;
     }
 
+    public syncFromState(state: { round: number, deck: SerializedCard[] }) {
+        this.round = state.round;
+        this.deck = deserializeCards(state.deck);
+    }
+
     drawCards(cardsPerPlayer = this.getCardsPerPlayerForRound()): Map<string, Card[]> {
         const hands: Map<string, Card[]> = new Map();
         let workingDeck = this.deck;
@@ -110,5 +115,31 @@ export class GameLogic {
         console.log('Trump suit chosen: ' + trumpCard.suit);
 
         return trumpCard.suit;
+    }
+
+    determineTrickWinner(trick: {playerId: string, card: Card }[], trumpSuit: CardSuit | null): string {
+        const leadSuit = trick[0].card.suit;
+        let winner = trick[0];
+
+        for (let i = 1; i < trick.length; i++) {
+            const current = trick[i];
+            const winnerCard = winner.card;
+            const currentCard = current.card;
+
+            // if current card is trump and winner isn't, trump wins
+            if (currentCard.suit === trumpSuit && winnerCard.suit !== trumpSuit) {
+                winner = current;
+            }
+            // if both are trump, highest wins
+            else if (currentCard.suit === trumpSuit && winnerCard.suit === trumpSuit) {
+                if (currentCard.value > winnerCard.value) winner = current;
+            }
+            // if current matches lead suit and winner is not trump
+            else if (currentCard.suit === leadSuit && winnerCard.suit !== trumpSuit) {
+                if (currentCard.value > winnerCard.value) winner = current;
+            }
+        }
+
+        return winner.playerId;
     }
 }

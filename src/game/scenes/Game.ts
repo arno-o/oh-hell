@@ -1,5 +1,5 @@
 import { Scene } from 'phaser';
-import { createBidBubble, createBidModal, createDrawPile, createMenuButtons, createOtherPlayersUI, createPlayerUI, createTurnText, moveDrawPileToTopLeft, PlayerAnchor, renderPlayerHand, renderTrickCards, renderTrumpCardNextToDeck } from '@/lib/ui';
+import { createBidBubble, createBidModal, createDrawPile, createMenuButtons, createOtherPlayersUI, createPlayerUI, moveDrawPileToTopLeft, PlayerAnchor, renderPlayerHand, renderTrickCards, renderTrumpCardNextToDeck } from '@/lib/ui';
 import { Card, createDeck, shuffleDeck } from '@/lib/deck';
 import { getParticipants, getState, isHost, myPlayer, onPlayerJoin, PlayerState, setState } from 'playroomkit';
 import { deserializeCards, GameLogic, serializeCards, SerializedCard } from '@/lib/gameLogic';
@@ -8,7 +8,10 @@ import { CardSprite } from '@/lib/cardSprite';
 let players: PlayerState[] = [];
 
 onPlayerJoin(async (player) => {
-    players.push(player);
+    const existing = players.find(p => p.id === player.id);
+    if (!existing) {
+        players.push(player);
+    }
 })
 
 export class Game extends Scene
@@ -23,7 +26,6 @@ export class Game extends Scene
     private trickSprites: CardSprite[] = [];
     private drawPileCards: Phaser.GameObjects.Image[] = [];
     private trumpCardSprite?: CardSprite;
-    private turnText?: Phaser.GameObjects.Text;
 
     // -- UI & Layout --
     private playerAnchors: Record<string, PlayerAnchor> = {};
@@ -114,21 +116,12 @@ export class Game extends Scene
         const otherAnchors = createOtherPlayersUI(scene, players, localPlayer.id);
         this.playerAnchors = { [localPlayer.id]: localAnchor, ...otherAnchors };
         createMenuButtons(scene);
-
-        this.turnText = createTurnText(scene);
     }
 
     update(): void {
         const currentTurnPlayerId = getState('currentTurnPlayerId') as string | undefined;
         if (currentTurnPlayerId && currentTurnPlayerId !== this.lastTurnPlayerId) {
             this.lastTurnPlayerId = currentTurnPlayerId;
-            const localId = myPlayer().id;
-            const players = getParticipants();
-            const currentPlayer = players[currentTurnPlayerId];
-            const displayName = currentPlayer?.getProfile().name ?? 'Unknown';
-            const label = currentTurnPlayerId === localId ? 'Your turn' : `Turn: ${displayName}`;
-            this.turnText?.setText(label);
-            console.log('[Turn] Current player', displayName);
 
             Object.entries(this.playerAnchors).forEach(([playerId, anchor]) => {
                 anchor.turnHighlight?.setAlpha(playerId === currentTurnPlayerId ? 1 : 0);
@@ -182,35 +175,79 @@ export class Game extends Scene
     private playCard(sprite: CardSprite): void {
         const currentTurnPlayerId = getState('currentTurnPlayerId') as string;
         const localId = myPlayer().id;
+
         if (currentTurnPlayerId !== localId) {
-            console.log('[Play] Not your turn');
-            return;
+            return; // not your turn
         }
 
         const card = sprite.cardData;
         const cardIndex = this.myHand.findIndex((handCard) => handCard.suit === card.suit && handCard.value === card.value);
-        if (cardIndex === -1) {
-            return;
-        }
+
+        if (cardIndex === -1) return;
 
         this.myHand.splice(cardIndex, 1);
         myPlayer().setState('hand', serializeCards(this.myHand));
         myPlayer().setState('handCount', this.myHand.length);
 
+        // refresh hand ui
         this.handSprites = renderPlayerHand(this, this.myHand, this.handSprites);
         this.attachHandInteractions(this.handSprites);
 
-        const existing = (getState('trickCards') as Array<{ playerId: string; card: SerializedCard }>) ?? [];
-        const next = [...existing, { playerId: localId, card: serializeCards([card])[0] }];
-        setState('trickCards', next);
+        // update trick state
+        const existingTrick = (getState('trickCards') as Array<{ playerId: string; card: SerializedCard }> ?? []);
+        const updatedTrick = [...existingTrick, { playerId: localId, card: serializeCards([card])[0] }];
+
+        setState('trickCards', updatedTrick);
         setState('trickVersion', (getState('trickVersion') ?? 0) + 1);
 
-        const turnOrder = (getState('turnOrder') as string[]) ?? [];
-        const turnIndex = getState('turnIndex') ?? 0;
-        const nextIndex = turnOrder.length ? (turnIndex + 1) % turnOrder.length : 0;
-        const nextPlayerId = turnOrder[nextIndex] ?? localId;
-        setState('turnIndex', nextIndex);
-        setState('currentTurnPlayerId', nextPlayerId);
+        // handle turn logic
+        const turnOrder = (getState('turnOrder') as string[]) ?? 0;
+        const participantCount = Object.keys(getParticipants()).length;
+
+        if (updatedTrick.length < participantCount) {
+            // truck is still going, move onto next player
+            const turnIndex = getState('turnIndex') ?? 0;
+            const nextIndex = (turnIndex + 1) % turnOrder.length;
+
+            setState('turnIndex', nextIndex);
+            setState('currentTurnPlayerId', turnOrder[nextIndex]);
+        } else {
+            if (isHost()) {
+                this.handleTrickCompletion(updatedTrick);
+            }
+        }
+    }
+
+    private handleTrickCompletion(trick: Array<{ playerId: string; card: SerializedCard }>): void {
+        const trumpSuit = getState('trumpSuit') as any;
+        const deserializedTrick = trick.map(t => ({
+            playerId: t.playerId,
+            card: deserializeCards([t.card])[0]
+        }));
+
+        const winnerId = this.logic.determineTrickWinner(deserializedTrick, trumpSuit);
+
+        // pause for 2 seconds
+        this.time.delayedCall(2000, () => {
+            // reset trick for everyone
+            setState('trickCards', []);
+            setState('trickVersion', (getState('trickVersion') ?? 0) + 1);
+
+            // update winner's trick count
+            const currentWins = getState(`tricks_${winnerId}`) ?? 0;
+            setState(`tricks_${winnerId}`, currentWins + 1);
+
+            // winner of the trick starts the next one
+            const turnOrder = (getState('turnOrder') as string[]) ?? [];
+            const nextWinnerIndex = turnOrder.indexOf(winnerId);
+            setState('turnIndex', nextWinnerIndex);
+            setState('currentTurnPlayerId', winnerId);
+
+            // check if round is over (everyone out of cards)
+            if (this.myHand.length === 0) {
+                console.log("Round Over!");
+            }
+        });
     }
 
     private updateBiddingUI(): void {
