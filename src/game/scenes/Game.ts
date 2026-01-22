@@ -1,32 +1,43 @@
 import { Scene } from 'phaser';
 import { createBidBubble, createBidModal, createDrawPile, createMenuButtons, createOtherPlayersUI, createPlayerUI, createTurnText, moveDrawPileToTopLeft, PlayerAnchor, renderPlayerHand, renderTrickCards, renderTrumpCardNextToDeck } from '@/lib/ui';
 import { Card, createDeck, shuffleDeck } from '@/lib/deck';
-import { getParticipants, getState, isHost, myPlayer, setState } from 'playroomkit';
+import { getParticipants, getState, isHost, myPlayer, onPlayerJoin, PlayerState, setState } from 'playroomkit';
 import { deserializeCards, GameLogic, serializeCards, SerializedCard } from '@/lib/gameLogic';
 import { CardSprite } from '@/lib/cardSprite';
 
+let players: PlayerState[] = [];
+
+onPlayerJoin(async (player) => {
+    players.push(player);
+})
+
 export class Game extends Scene
 {
-    deck: Card[];
-    logic: GameLogic;
-    handSprites: CardSprite[] = [];
-    myHand: Card[] = [];
-    lastDealId = 0;
-    pileX = 0;
-    pileY = 0;
-    drawPileCards: Phaser.GameObjects.Image[] = [];
-    trumpCardSprite?: CardSprite;
-    turnText?: Phaser.GameObjects.Text;
-    lastTurnPlayerId?: string;
-    lastTrickVersion = 0;
-    trickSprites: CardSprite[] = [];
-    deckAnchor = { x: 0, y: 0 };
-    playerAnchors: Record<string, PlayerAnchor> = {};
-    bidModal?: Phaser.GameObjects.Container;
-    lastBidPlayerId?: string;
-    lastBidValue?: number;
-    bidBubbles: Record<string, Phaser.GameObjects.Container> = {};
-    lastBids: Record<string, number | null> = {};
+    // -- Game State --
+    private deck: Card[];
+    private logic: GameLogic;
+    private myHand: Card[] = [];
+
+    // -- Visual Elements --
+    private handSprites: CardSprite[] = [];
+    private trickSprites: CardSprite[] = [];
+    private drawPileCards: Phaser.GameObjects.Image[] = [];
+    private trumpCardSprite?: CardSprite;
+    private turnText?: Phaser.GameObjects.Text;
+
+    // -- UI & Layout --
+    private playerAnchors: Record<string, PlayerAnchor> = {};
+    private bidModal?: Phaser.GameObjects.Container;
+    private bidBubbles: Record<string, Phaser.GameObjects.Container> = {};
+    private deckAnchor = { x: 0, y: 0 };
+    private pileX = 0;
+    private pileY = 0;
+
+    // -- State Tracking --
+    private lastDealId = 0;
+    private lastTurnPlayerId?: string;
+    private lastTrickVersion = 0;
+    private lastBids: Record<string, number | null> = {};
 
     constructor() { super('Game'); }
 
@@ -39,8 +50,7 @@ export class Game extends Scene
 
     runGameSetup(scene: Phaser.Scene): void {
         const localPlayer = myPlayer();
-        const allPlayers = Object.values(getParticipants());
-        this.logic = new GameLogic(this.deck, allPlayers.map((player) => player.id));
+        this.logic = new GameLogic(this.deck, players.map((player) => player.id));
 
         if (isHost()) {
             setState('hostId', localPlayer.id);
@@ -64,7 +74,7 @@ export class Game extends Scene
                 remainingDeck: this.logic.getRemainingDeck().length
             });
 
-            Object.values(getParticipants()).forEach((player) => {
+            players.forEach((player) => {
                 const hand = hands?.get(player.id) ?? [];
                 player.setState('hand', serializeCards(hand));
                 player.setState('handCount', hand.length);
@@ -77,7 +87,7 @@ export class Game extends Scene
             setState('trumpSuit', trumpSuit);
             setState('trumpCard', trumpCard ? serializeCards([trumpCard])[0] : null);
             const hostId = getState('hostId') ?? localPlayer.id;
-            const turnOrder = this.getTurnOrder(allPlayers.map((player) => player.id), hostId);
+            const turnOrder = this.getTurnOrder(players.map((player) => player.id), hostId);
             setState('turnOrder', turnOrder);
             setState('turnIndex', 0);
             setState('currentTurnPlayerId', hostId);
@@ -101,7 +111,7 @@ export class Game extends Scene
         this.drawPileCards = drawPileCards;
 
         const localAnchor = createPlayerUI(scene, localPlayer);
-        const otherAnchors = createOtherPlayersUI(scene, allPlayers, localPlayer.id);
+        const otherAnchors = createOtherPlayersUI(scene, players, localPlayer.id);
         this.playerAnchors = { [localPlayer.id]: localAnchor, ...otherAnchors };
         createMenuButtons(scene);
 
@@ -170,7 +180,7 @@ export class Game extends Scene
     }
 
     private playCard(sprite: CardSprite): void {
-        const currentTurnPlayerId = getState('currentTurnPlayerId') as string | undefined;
+        const currentTurnPlayerId = getState('currentTurnPlayerId') as string;
         const localId = myPlayer().id;
         if (currentTurnPlayerId !== localId) {
             console.log('[Play] Not your turn');
@@ -231,10 +241,7 @@ export class Game extends Scene
     }
 
     private submitBid(bid: number): void {
-        const localId = myPlayer().id;
         myPlayer().setState('bid', bid);
-        this.lastBidPlayerId = localId;
-        this.lastBidValue = bid;
 
         const order = (getState('biddingOrder') as string[]) ?? [];
         const currentIndex = getState('biddingIndex') ?? 0;

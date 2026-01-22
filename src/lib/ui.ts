@@ -135,14 +135,24 @@ export function createOtherPlayersUI(scene: Phaser.Scene, players: PlayerState[]
     others.forEach((player, index) => {
         const position = positions[index];
         if (position) {
-            anchors[player.id] = createSidePlayerUI(scene, player, position);
+            anchors[player.id] = createSidePlayerUI(scene, player, position, isBotPlayer(player));
         }
     });
 
     return anchors;
 }
 
-function createSidePlayerUI(scene: Phaser.Scene, player: PlayerState, position: 'left' | 'top' | 'right'): PlayerAnchor {
+function isBotPlayer(player: PlayerState): boolean {
+    const maybe = player as PlayerState & { isBot?: () => boolean };
+    if (typeof maybe.isBot === 'function') {
+        return maybe.isBot();
+    }
+
+    const profile = player.getProfile() as { name?: string; isBot?: boolean };
+    return Boolean(profile.isBot) || /bot/i.test(profile.name ?? '');
+}
+
+function createSidePlayerUI(scene: Phaser.Scene, player: PlayerState, position: 'left' | 'top' | 'right', isBot: boolean): PlayerAnchor {
     const profileImageRadius = 32;
     const avatarSize = profileImageRadius * 2;
     const margin = 28;
@@ -186,6 +196,7 @@ function createSidePlayerUI(scene: Phaser.Scene, player: PlayerState, position: 
     const avatarY = panelY + (panelHeight - avatarSize) / 2;
 
     loadAvatar(scene, player.getProfile().photo, `avatar-${player.id}`, avatarX, avatarY, avatarSize);
+
     scene
         .add.circle(avatarX, avatarY, profileImageRadius)
         .setOrigin(0, 0)
@@ -200,12 +211,16 @@ function createSidePlayerUI(scene: Phaser.Scene, player: PlayerState, position: 
 
     const baseTextX = avatarX + avatarSize + 12;
     const profile = player.getProfile();
-    const isBot = Boolean((profile as { isBot?: boolean }).isBot ?? (player as { isBot?: boolean }).isBot ?? /bot/i.test(profile.name));
+    /**
+     * Indicates whether the current participant should be treated as a bot.
+     * Determined by checking an explicit `isBot` flag on the profile or player,
+     * or by matching "bot" in the profile name.
+     */
     const botBadgeWidth = 36;
     const botBadgeHeight = 16;
     const botBadgeX = baseTextX;
     const nameY = panelY + 18;
-    const nameX = isBot ? baseTextX + botBadgeWidth + 8 : baseTextX;
+    const nameX = player ? baseTextX + botBadgeWidth + 8 : baseTextX;
 
     if (isBot) {
         const botBadgeBg = scene.add.graphics();
