@@ -48,10 +48,10 @@ export class Game extends Scene
     private lastTrickVersion = 0;
     private lastBids: Record<string, number | null> = {};
     private botNextActionAt: Map<string, number> = new Map();
-    private botBaseDelayMs = 900;
-    private botRandomDelayMs = 700;
+    private botBaseDelayMs = 500;
+    private botRandomDelayMs = 400;
     private botPendingAction: Map<string, boolean> = new Map();
-    private botTurnDelayMs = 1000;
+    private botTurnDelayMs = 500;
     private botBidDelayMs = 200;
     private isAnimatingTrickWin = false;
 
@@ -118,7 +118,6 @@ export class Game extends Scene
             this.deckAnchor = moveDrawPileToTopLeft(this, this.drawPileCards);
             this.trumpCardSprite = renderTrumpCardNextToDeck(this, trumpCard ?? null, this.trumpCardSprite, this.deckAnchor);
 
-            this.logic.advanceRound();
             drawButton.destroy();
         });
 
@@ -274,7 +273,10 @@ export class Game extends Scene
 
             // check if round is over (everyone out of cards)
             if (this.myHand.length === 0) {
-                console.log("Round Over!");
+                console.log('[Round] Round complete, starting new round');
+                this.time.delayedCall(2000, () => {
+                    this.startNewRound();
+                });
             }
         });
     }
@@ -505,5 +507,56 @@ export class Game extends Scene
         const unique = Array.from(new Set(playerIds));
         const others = unique.filter((id) => id !== hostId).sort();
         return [hostId, ...others];
+    }
+
+    private startNewRound(): void {
+        if (!isHost()) return;
+
+        // check if game should continue
+        if (!this.logic.shouldContinueGame()) {
+            console.log('[Game] Game Over! All 13 rounds completed.');
+            setState('gameOver', true);
+            // TODO: Show final scores and game over screen
+            return;
+        }
+
+        // reset deck and prepare next round
+        const newDeck = shuffleDeck(createDeck());
+        const { cardsPerPlayer, round } = this.logic.prepareNextRound(newDeck);
+
+        console.log('[Round] Starting round', { round, cardsPerPlayer });
+
+        // deal new hands
+        const hands = this.logic.drawCards(cardsPerPlayer);
+        const trumpSuit = this.logic.getTrumpSuit();
+        const trumpCard = this.logic.getRemainingDeck()[0];
+
+        // reset all player states
+        players.forEach((player) => {
+            const hand = hands?.get(player.id) ?? [];
+            player.setState('hand', serializeCards(hand));
+            player.setState('handCount', hand.length);
+            player.setState('bid', null);
+            setState(`tricks_${player.id}`, 0);
+        });
+
+        // update global state
+        setState('round', round);
+        setState('cardsPerPlayer', cardsPerPlayer);
+        setState('trumpSuit', trumpSuit);
+        setState('trumpCard', trumpCard ? serializeCards([trumpCard])[0] : null);
+        
+        const hostId = getState('hostId') ?? myPlayer().id;
+        const turnOrder = this.getTurnOrder(players.map((player) => player.id), hostId);
+        setState('turnOrder', turnOrder);
+        setState('biddingOrder', turnOrder);
+        setState('biddingIndex', 0);
+        setState('currentBidPlayerId', hostId);
+        setState('biddingPhase', true);
+        
+        const nextDealId = (getState('dealId') ?? 0) + 1;
+        setState('dealId', nextDealId);
+
+        console.log('[Round] New round state committed', { dealId: nextDealId, round });
     }
 }

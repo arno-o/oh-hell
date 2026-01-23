@@ -23,6 +23,11 @@ export function deserializeCards(cards: SerializedCard[]): Card[] {
     });
 }
 
+function getCardRank(card: Card): number {
+    // Ace (value 1) should be the highest card
+    return card.value === 1 ? 14 : card.value;
+}
+
 export class GameLogic {
     private deck: Card[];
     private playerIds: string[];
@@ -81,24 +86,25 @@ export class GameLogic {
         maxCards = this.maxCardsPerPlayer,
         minCards = this.minCardsPerPlayer
     ): number {
+        // Game has 13 rounds: 7→6→5→4→3→2→1→2→3→4→5→6→7
+        if (roundNumber > 13) {
+            return 0; // Game is over
+        }
+
         if (maxCards <= minCards) {
             return Math.max(1, maxCards);
         }
 
-        const span = maxCards - minCards;
-        const period = span * 2;
-        const index = (roundNumber - 1) % period;
-
-        if (index <= span) {
-            return maxCards - index;
+        const span = maxCards - minCards; // 6
+        
+        // Descending phase: rounds 1-7 (7 cards down to 1)
+        if (roundNumber <= span + 1) {
+            return maxCards - (roundNumber - 1);
         }
-
-        return minCards + (index - span);
-    }
-
-    advanceRound(): number {
-        this.round += 1;
-        return this.round;
+        
+        // Ascending phase: rounds 8-13 (2 cards up to 7)
+        const ascendingIndex = roundNumber - (span + 1); // 8→1, 9→2, etc.
+        return minCards + ascendingIndex;
     }
 
     getTrumpSuit(): CardSuit | null {
@@ -132,14 +138,50 @@ export class GameLogic {
             }
             // if both are trump, highest wins
             else if (currentCard.suit === trumpSuit && winnerCard.suit === trumpSuit) {
-                if (currentCard.value > winnerCard.value) winner = current;
+                if (getCardRank(currentCard) > getCardRank(winnerCard)) winner = current;
             }
             // if current matches lead suit and winner is not trump
             else if (currentCard.suit === leadSuit && winnerCard.suit !== trumpSuit) {
-                if (currentCard.value > winnerCard.value) winner = current;
+                if (getCardRank(currentCard) > getCardRank(winnerCard)) winner = current;
             }
         }
 
         return winner.playerId;
+    }
+
+    isRoundComplete(): boolean {
+        // check if any player still has cards
+        for (const hand of this.hands.values()) {
+            if (hand.length > 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    shouldContinueGame(): boolean {
+        // Game ends after round 13
+        if (this.round >= 13) {
+            return false;
+        }
+        
+        const nextRoundCards = this.getCardsPerPlayerForRound(this.round + 1);
+        if (nextRoundCards === 0) {
+            return false;
+        }
+        
+        return true;
+    }
+
+    prepareNextRound(newDeck: Card[]): { cardsPerPlayer: number; round: number } {
+        this.deck = newDeck;
+        this.hands.clear();
+        this.round += 1;
+        const cardsPerPlayer = this.getCardsPerPlayerForRound();
+        return { cardsPerPlayer, round: this.round };
+    }
+
+    isGameOver(): boolean {
+        return this.round > 13;
     }
 }
