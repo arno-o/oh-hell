@@ -567,6 +567,15 @@ export function renderTrickCards(
         );
         sprite.setAngle(offset.angle);
         sprite.setDepth(20 + index);
+        sprite.setAlpha(0);
+        sprite.setScale(CARD_SCALE * 0.85);
+        scene.tweens.add({
+            targets: sprite,
+            alpha: 1,
+            scale: CARD_SCALE,
+            duration: 260,
+            ease: 'Cubic.easeOut'
+        });
         return sprite;
     });
 }
