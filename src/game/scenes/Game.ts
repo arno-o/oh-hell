@@ -1,9 +1,16 @@
 import { Scene } from 'phaser';
 import { createBidBubble, createBidModal, createDrawPile, createMenuButtons, createOtherPlayersUI, createPlayerUI, moveDrawPileToTopLeft, PlayerAnchor, renderPlayerHand, renderTrickCards, renderTrumpCardNextToDeck } from '@/lib/ui';
+import { CARD_SCALE } from '@/lib/common';
 import { Card, createDeck, shuffleDeck } from '@/lib/deck';
 import { getParticipants, getState, isHost, myPlayer, onPlayerJoin, PlayerState, setState } from 'playroomkit';
 import { deserializeCards, GameLogic, serializeCards, SerializedCard } from '@/lib/gameLogic';
 import { CardSprite } from '@/lib/cardSprite';
+import { PlayerBot } from '@/player/Bot';
+
+type BotCapablePlayer = PlayerState & {
+    isBot: () => boolean;
+    bot?: PlayerBot;
+};
 
 let players: PlayerState[] = [];
 
@@ -40,6 +47,13 @@ export class Game extends Scene
     private lastTurnPlayerId?: string;
     private lastTrickVersion = 0;
     private lastBids: Record<string, number | null> = {};
+    private botNextActionAt: Map<string, number> = new Map();
+    private botBaseDelayMs = 900;
+    private botRandomDelayMs = 700;
+    private botPendingAction: Map<string, boolean> = new Map();
+    private botTurnDelayMs = 1000;
+    private botBidDelayMs = 200;
+    private isAnimatingTrickWin = false;
 
     constructor() { super('Game'); }
 
@@ -153,7 +167,7 @@ export class Game extends Scene
         }
 
         const trickVersion = getState('trickVersion') ?? 0;
-        if (trickVersion !== this.lastTrickVersion) {
+        if (trickVersion !== this.lastTrickVersion && !this.isAnimatingTrickWin) {
             this.lastTrickVersion = trickVersion;
             const trickCards = (getState('trickCards') as Array<{ playerId: string; card: SerializedCard }>) ?? [];
             const cards = trickCards.map((entry) => deserializeCards([entry.card])[0]);
@@ -161,6 +175,7 @@ export class Game extends Scene
         }
 
         this.updateBiddingUI();
+        this.updateBots();
     }
 
     private attachHandInteractions(sprites: CardSprite[]): void {
@@ -208,9 +223,17 @@ export class Game extends Scene
             // truck is still going, move onto next player
             const turnIndex = getState('turnIndex') ?? 0;
             const nextIndex = (turnIndex + 1) % turnOrder.length;
+            const nextPlayerId = turnOrder[nextIndex];
 
-            setState('turnIndex', nextIndex);
-            setState('currentTurnPlayerId', turnOrder[nextIndex]);
+            if (this.shouldDelayForPlayer(nextPlayerId)) {
+                this.time.delayedCall(this.botTurnDelayMs, () => {
+                    setState('turnIndex', nextIndex);
+                    setState('currentTurnPlayerId', nextPlayerId);
+                });
+            } else {
+                setState('turnIndex', nextIndex);
+                setState('currentTurnPlayerId', nextPlayerId);
+            }
         } else {
             if (isHost()) {
                 this.handleTrickCompletion(updatedTrick);
@@ -227,11 +250,17 @@ export class Game extends Scene
 
         const winnerId = this.logic.determineTrickWinner(deserializedTrick, trumpSuit);
 
-        // pause for 2 seconds
-        this.time.delayedCall(2000, () => {
+        // delay animation start to allow UI to render the complete trick first
+        this.time.delayedCall(1000, () => {
+            this.animateTrickWinner(winnerId);
+        });
+
+        this.time.delayedCall(1700, () => {
             // reset trick for everyone
             setState('trickCards', []);
             setState('trickVersion', (getState('trickVersion') ?? 0) + 1);
+            this.isAnimatingTrickWin = false;
+            this.lastTrickVersion = getState('trickVersion') ?? 0;
 
             // update winner's trick count
             const currentWins = getState(`tricks_${winnerId}`) ?? 0;
@@ -248,6 +277,37 @@ export class Game extends Scene
                 console.log("Round Over!");
             }
         });
+    }
+
+    private animateTrickWinner(winnerId: string): void {
+        const anchor = this.playerAnchors[winnerId];
+
+        if (!anchor) return;
+
+        this.isAnimatingTrickWin = true;
+
+        if (anchor.turnHighlight) {
+            anchor.turnHighlight.setAlpha(1);
+            this.tweens.add({
+                targets: anchor.turnHighlight,
+                alpha: 0,
+                duration: 900,
+                ease: 'Sine.easeInOut'
+            });
+        }
+
+        if (this.trickSprites.length) {
+            this.tweens.add({
+                targets: this.trickSprites,
+                alpha: 0,
+                x: anchor.x,
+                y: anchor.y,
+                scale: CARD_SCALE * 0.5,
+                duration: 800,
+                ease: 'Power2',
+                stagger: 80
+            });
+        }
     }
 
     private updateBiddingUI(): void {
@@ -291,8 +351,154 @@ export class Game extends Scene
         }
 
         const nextPlayerId = order[nextIndex];
-        setState('biddingIndex', nextIndex);
-        setState('currentBidPlayerId', nextPlayerId);
+        if (this.shouldDelayForPlayer(nextPlayerId)) {
+            this.time.delayedCall(this.botBidDelayMs, () => {
+                setState('biddingIndex', nextIndex);
+                setState('currentBidPlayerId', nextPlayerId);
+            });
+        } else {
+            setState('biddingIndex', nextIndex);
+            setState('currentBidPlayerId', nextPlayerId);
+        }
+    }
+
+    private updateBots(): void {
+        if (!isHost()) return;
+
+        const now = this.time.now;
+        const biddingPhase = Boolean(getState('biddingPhase'));
+        const currentBidPlayerId = getState('currentBidPlayerId') as string | undefined;
+        const currentTurnPlayerId = getState('currentTurnPlayerId') as string | undefined;
+        const trickCards = (getState('trickCards') as Array<{ playerId: string; card: SerializedCard }>) ?? [];
+        const trumpSuit = getState('trumpSuit') as any;
+        const round = (getState('round') as number | undefined) ?? 1;
+        const participantCount = Object.keys(getParticipants()).length;
+
+        players.forEach((player) => {
+            const botPlayer = player as BotCapablePlayer;
+            if (!botPlayer.isBot()) return;
+
+            const bot = botPlayer.bot;
+            if (!bot) return;
+
+            if (biddingPhase && botPlayer.id === currentBidPlayerId && botPlayer.getState('bid') == null) {
+                if (!this.isBotReady(botPlayer.id, now)) return;
+                if (this.botPendingAction.get(botPlayer.id)) return;
+
+                this.botPendingAction.set(botPlayer.id, true);
+                this.time.delayedCall(this.botTurnDelayMs, () => {
+                    const hand = (botPlayer.getState('hand') as SerializedCard[]) ?? [];
+                    const bid = bot.decideBid(hand.length, trumpSuit, round);
+                    this.submitBidForPlayer(botPlayer, bid);
+                    this.scheduleNextBotAction(botPlayer.id, this.time.now);
+                    this.botPendingAction.set(botPlayer.id, false);
+                });
+                return;
+            }
+
+            if (!biddingPhase && currentTurnPlayerId === botPlayer.id) {
+                if (!this.isBotReady(botPlayer.id, now)) return;
+                if (this.botPendingAction.get(botPlayer.id)) return;
+                const alreadyPlayed = trickCards.some((entry) => entry.playerId === botPlayer.id);
+                if (alreadyPlayed) return;
+
+                const hand = (botPlayer.getState('hand') as SerializedCard[]) ?? [];
+                if (!hand.length) return;
+
+                const chosen = bot.chooseCard(hand, trickCards, trumpSuit, participantCount);
+                if (!chosen) return;
+
+                this.botPendingAction.set(botPlayer.id, true);
+                this.time.delayedCall(this.botTurnDelayMs, () => {
+                    this.playCardForPlayer(botPlayer, chosen);
+                    this.scheduleNextBotAction(botPlayer.id, this.time.now);
+                    this.botPendingAction.set(botPlayer.id, false);
+                });
+            }
+        });
+    }
+
+    private isBotReady(playerId: string, now: number): boolean {
+        const nextAt = this.botNextActionAt.get(playerId) ?? 0;
+        return now >= nextAt;
+    }
+
+    private scheduleNextBotAction(playerId: string, now: number): void {
+        const jitter = Math.floor(Math.random() * this.botRandomDelayMs);
+        this.botNextActionAt.set(playerId, now + this.botBaseDelayMs + jitter);
+    }
+
+    private submitBidForPlayer(player: PlayerState, bid: number): void {
+        player.setState('bid', bid);
+
+        const order = (getState('biddingOrder') as string[]) ?? [];
+        const currentIndex = getState('biddingIndex') ?? 0;
+        const nextIndex = currentIndex + 1;
+
+        if (nextIndex >= order.length) {
+            setState('biddingPhase', false);
+            setState('currentBidPlayerId', null);
+            return;
+        }
+
+        const nextPlayerId = order[nextIndex];
+        if (this.shouldDelayForPlayer(nextPlayerId)) {
+            this.time.delayedCall(this.botBidDelayMs, () => {
+                setState('biddingIndex', nextIndex);
+                setState('currentBidPlayerId', nextPlayerId);
+            });
+        } else {
+            setState('biddingIndex', nextIndex);
+            setState('currentBidPlayerId', nextPlayerId);
+        }
+    }
+
+    private playCardForPlayer(player: PlayerState, card: SerializedCard): void {
+        const currentTurnPlayerId = getState('currentTurnPlayerId') as string;
+        if (currentTurnPlayerId !== player.id) return;
+
+        const hand = (player.getState('hand') as SerializedCard[]) ?? [];
+        const cardIndex = hand.findIndex((handCard) => handCard.suit === card.suit && handCard.value === card.value);
+
+        if (cardIndex === -1) return;
+
+        const updatedHand = [...hand];
+        updatedHand.splice(cardIndex, 1);
+        player.setState('hand', updatedHand);
+        player.setState('handCount', updatedHand.length);
+
+        const existingTrick = (getState('trickCards') as Array<{ playerId: string; card: SerializedCard }> ?? []);
+        const updatedTrick = [...existingTrick, { playerId: player.id, card }];
+
+        setState('trickCards', updatedTrick);
+        setState('trickVersion', (getState('trickVersion') ?? 0) + 1);
+
+        const turnOrder = (getState('turnOrder') as string[]) ?? [];
+        const participantCount = Object.keys(getParticipants()).length;
+
+        if (updatedTrick.length < participantCount) {
+            const turnIndex = getState('turnIndex') ?? 0;
+            const nextIndex = (turnIndex + 1) % turnOrder.length;
+            const nextPlayerId = turnOrder[nextIndex];
+
+            if (this.shouldDelayForPlayer(nextPlayerId)) {
+                this.time.delayedCall(this.botTurnDelayMs, () => {
+                    setState('turnIndex', nextIndex);
+                    setState('currentTurnPlayerId', nextPlayerId);
+                });
+            } else {
+                setState('turnIndex', nextIndex);
+                setState('currentTurnPlayerId', nextPlayerId);
+            }
+        } else {
+            this.handleTrickCompletion(updatedTrick);
+        }
+    }
+
+    private shouldDelayForPlayer(playerId: string): boolean {
+        const player = players.find((p) => p.id === playerId) as BotCapablePlayer | undefined;
+        if (!player || typeof player.isBot !== 'function') return false;
+        return player.isBot();
     }
 
     private getTurnOrder(playerIds: string[], hostId: string): string[] {
