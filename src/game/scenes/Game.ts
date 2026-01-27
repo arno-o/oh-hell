@@ -435,7 +435,7 @@ export class Game extends Scene
                 this.botPendingAction.set(botPlayer.id, true);
                 this.time.delayedCall(this.botTurnDelayMs, () => {
                     const hand = (botPlayer.getState('hand') as SerializedCard[]) ?? [];
-                    const bid = bot.decideBid(hand.length, trumpSuit, round);
+                    const bid = bot.decideBid(hand, trumpSuit, round);
                     this.submitBidForPlayer(botPlayer, bid);
                     this.scheduleNextBotAction(botPlayer.id, this.time.now);
                     this.botPendingAction.set(botPlayer.id, false);
@@ -452,7 +452,9 @@ export class Game extends Scene
                 const hand = (botPlayer.getState('hand') as SerializedCard[]) ?? [];
                 if (!hand.length) return;
 
-                const chosen = bot.chooseCard(hand, trickCards, trumpSuit, participantCount);
+                const bid = (botPlayer.getState('bid') as number | null) ?? 0;
+                const currentTricks = (getState(`tricks_${botPlayer.id}`) as number | undefined) ?? 0;
+                const chosen = bot.chooseCard(hand, trickCards, trumpSuit, participantCount, bid, currentTricks);
                 if (!chosen) return;
 
                 this.botPendingAction.set(botPlayer.id, true);

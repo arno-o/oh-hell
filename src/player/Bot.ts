@@ -18,14 +18,22 @@ export class PlayerBot extends Bot {
         this.setState("rngSeed", this.rngSeed);
     }
 
-    decideBid(handCount: number, trumpSuit: CardSuit | null, round: number): number {
+    decideBid(hand: SerializedCard[], trumpSuit: CardSuit | null, round: number): number {
         const seed = this.getState("rngSeed") as number | undefined;
         this.rngSeed = typeof seed === "number" ? seed : Math.floor(Math.random() * 1_000_000);
 
-        const base = Math.max(0, handCount - 1);
-        const variance = this.nextInt(0, 2);
-        const bias = trumpSuit ? 1 : 0;
-        const bid = Math.min(handCount, Math.max(0, base + bias + variance - (round % 2)));
+        const handCount = hand.length;
+        if (handCount === 0) return 0;
+
+        const highValues = new Set([1, 13, 12, 11, 10]); // A, K, Q, J, 10
+        const highCount = hand.filter((card) => highValues.has(card.value)).length;
+        const trumpCount = trumpSuit ? hand.filter((card) => card.suit === trumpSuit).length : 0;
+
+        const strengthScore = highCount * 0.7 + trumpCount * 0.9 + (handCount - highCount) * 0.15;
+        const expected = Math.round(strengthScore / 1.2);
+        const variance = this.nextInt(0, 2) - 1; // -1, 0, 1
+        const roundBias = round % 2 === 0 ? 0 : -1;
+        const bid = Math.min(handCount, Math.max(0, expected + variance + roundBias));
 
         return bid;
     }
@@ -34,38 +42,49 @@ export class PlayerBot extends Bot {
         hand: SerializedCard[],
         trickCards: Array<{ playerId: string; card: SerializedCard }>,
         trumpSuit: CardSuit | null,
-        participantCount: number
+        participantCount: number,
+        targetBid: number | null,
+        currentTricks: number
     ): SerializedCard | null {
         if (!hand.length) return null;
 
         const leadSuit = trickCards.length ? trickCards[0].card.suit : null;
         const isLastToAct = participantCount > 0 && trickCards.length === participantCount - 1;
+        const bidTarget = targetBid ?? 0;
+        const needsWins = currentTricks < bidTarget;
 
         if (!leadSuit) {
             const nonTrump = trumpSuit
                 ? hand.filter((card) => card.suit !== trumpSuit)
                 : hand;
             const candidates = nonTrump.length ? nonTrump : hand;
-            return this.selectLowest(candidates);
+            return needsWins ? this.selectHighest(candidates) : this.selectLowest(candidates);
         }
 
         const followSuit = hand.filter((card) => card.suit === leadSuit);
         const candidates = followSuit.length ? followSuit : hand;
         const currentWinner = this.getCurrentWinner(trickCards, leadSuit, trumpSuit);
 
-        if (isLastToAct && currentWinner) {
-            const winningPlay = this.findLowestWinningCard(candidates, currentWinner, leadSuit, trumpSuit);
-            if (winningPlay) return winningPlay;
+        if (currentWinner) {
+            if (needsWins) {
+                const winningPlay = this.findLowestWinningCard(candidates, currentWinner, leadSuit, trumpSuit);
+                if (winningPlay) return winningPlay;
+            } else {
+                const losingPlay = this.findLowestLosingCard(candidates, currentWinner, leadSuit, trumpSuit);
+                if (losingPlay) return losingPlay;
+            }
         }
 
-        if (!followSuit.length && trumpSuit) {
+        if (!followSuit.length && trumpSuit && needsWins) {
             const trumps = hand.filter((card) => card.suit === trumpSuit);
             if (trumps.length) {
                 return this.selectLowest(trumps);
             }
         }
 
-        return this.selectLowest(candidates);
+        return needsWins && isLastToAct
+            ? this.selectHighest(candidates)
+            : this.selectLowest(candidates);
     }
 
     private nextInt(min: number, max: number): number {
@@ -83,6 +102,10 @@ export class PlayerBot extends Bot {
 
     private selectLowest(cards: SerializedCard[]): SerializedCard {
         return [...cards].sort((a, b) => a.value - b.value)[0];
+    }
+
+    private selectHighest(cards: SerializedCard[]): SerializedCard {
+        return [...cards].sort((a, b) => b.value - a.value)[0];
     }
 
     private getCurrentWinner(
@@ -117,6 +140,21 @@ export class PlayerBot extends Bot {
         if (!winningCards.length) return null;
 
         return this.selectLowest(winningCards);
+    }
+
+    private findLowestLosingCard(
+        candidates: SerializedCard[],
+        currentWinner: SerializedCard,
+        leadSuit: CardSuit,
+        trumpSuit: CardSuit | null
+    ): SerializedCard | null {
+        const losingCards = candidates.filter((card) =>
+            !this.cardBeats(card, currentWinner, leadSuit, trumpSuit)
+        );
+
+        if (!losingCards.length) return null;
+
+        return this.selectLowest(losingCards);
     }
 
     private cardBeats(
