@@ -55,6 +55,7 @@ export class Game extends Scene
     private botBidDelayMs = 200;
     private isAnimatingTrickWin = false;
     private isHandDisabledForBid = false;
+    private isHandDisabledForDelay = false;
 
     constructor() { super('Game'); }
 
@@ -122,7 +123,9 @@ export class Game extends Scene
             drawButton.destroy();
 
             setState('biddingPhase', false);
+            this.setHandDisabledForDelay(true);
             await delay(3000);
+            this.setHandDisabledForDelay(false);
             setState('biddingPhase', true);
         });
 
@@ -161,6 +164,7 @@ export class Game extends Scene
                     staggerMs: 70
                 });
                 this.attachHandInteractions(this.handSprites);
+                this.setHandDisabledForDelay(this.isHandDisabledForDelay);
             }
 
             const trumpState = getState('trumpCard') as SerializedCard | null;
@@ -354,24 +358,30 @@ export class Game extends Scene
     }
 
     private setHandDisabledForBid(disabled: boolean): void {
-        if (disabled === this.isHandDisabledForBid) {
-            if (disabled) {
-                this.handSprites.forEach((sprite) => sprite.markAsDisabled());
-            }
+        this.isHandDisabledForBid = disabled;
+        this.setHandDisabled(disabled, true);
+    }
+
+    private setHandDisabledForDelay(disabled: boolean): void {
+        this.isHandDisabledForDelay = disabled;
+        this.setHandDisabled(disabled, false);
+    }
+
+    private setHandDisabled(disabled: boolean, applyTint: boolean): void {
+        if (disabled) {
+            this.handSprites.forEach((sprite) => sprite.markAsDisabled(applyTint));
             return;
         }
 
-        this.isHandDisabledForBid = disabled;
-
-        if (disabled) {
-            this.handSprites.forEach((sprite) => sprite.markAsDisabled());
-        } else {
-            this.handSprites.forEach((sprite) => {
-                sprite.clearTint();
-                sprite.enableInteractions();
-            });
-            this.attachHandInteractions(this.handSprites);
+        if (this.isHandDisabledForBid || this.isHandDisabledForDelay) {
+            return;
         }
+
+        this.handSprites.forEach((sprite) => {
+            sprite.clearTint();
+            sprite.enableInteractions();
+        });
+        this.attachHandInteractions(this.handSprites);
     }
 
     private submitBid(bid: number): void {

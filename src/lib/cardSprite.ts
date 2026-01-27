@@ -69,13 +69,15 @@ export class CardSprite extends Phaser.GameObjects.Sprite {
         this.on('pointerdown', this.onPointerDown, this);
     }
 
-    public markAsDisabled() {
+    public markAsDisabled(applyTint = true) {
         this.isHovered = false;
         this.isDragging = false;
         this.disableInteractive();
         this.removeAllListeners();
 
-        this.setTint(0x777777);
+        if (applyTint) {
+            this.setTint(0x777777);
+        }
     }
 
     private onPointerOver() {
