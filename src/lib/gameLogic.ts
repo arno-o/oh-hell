@@ -23,6 +23,13 @@ export function deserializeCards(cards: SerializedCard[]): Card[] {
     });
 }
 
+/**
+ * @params ms - Duration of delay (in ms)
+ */
+export function delay(ms: number) {
+    return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
 function getCardRank(card: Card): number {
     // Ace (value 1) should be the highest card
     return card.value === 1 ? 14 : card.value;

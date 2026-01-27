@@ -422,58 +422,225 @@ export function createBidBubble(
     return container;
 }
 
-export function createBidModal(
-    scene: Phaser.Scene,
-    maxBid: number,
-    onSelect: (bid: number) => void
-): Phaser.GameObjects.Container {
+export function createBidModal(scene: Phaser.Scene, maxBid: number, onSelect: (bid: number) => void): Phaser.GameObjects.Container {
     const container = scene.add.container(0, 0);
-    const overlay = scene.add.rectangle(0, 0, scene.scale.width, scene.scale.height, 0x000000, 0.5)
-        .setOrigin(0, 0)
-        .setInteractive();
+    const overlay = scene.add.rectangle(0, 0, scene.scale.width, scene.scale.height, 0x000000, 0.5).setOrigin(0, 0);
 
-    const panelWidth = Math.min(scene.scale.width * 0.8, 420);
-    const panelHeight = Math.min(scene.scale.height * 0.5, 280);
+    const panelWidth = 320;
+    const panelHeight = 400;
     const panelX = scene.scale.width / 2 - panelWidth / 2;
     const panelY = scene.scale.height / 2 - panelHeight / 2;
 
     const panel = scene.add.graphics();
-    panel.fillStyle(0x222222, 0.95);
-    panel.fillRoundedRect(panelX, panelY, panelWidth, panelHeight, 12);
+    panel.fillStyle(0xd1d5db, 1);
+    panel.fillRoundedRect(panelX, panelY, panelWidth, panelHeight, 16);
 
     const title = scene.add.text(scene.scale.width / 2, panelY + 20, 'Place your bid', {
-        fontSize: '20px',
-        color: '#ffffff'
+        fontSize: '18px',
+        color: '#1f2937',
+        fontStyle: 'bold'
     }).setOrigin(0.5, 0);
 
-    const buttons: Phaser.GameObjects.Text[] = [];
-    const padding = 16;
-    const buttonSize = 42;
-    const cols = Math.min(6, Math.max(2, maxBid));
-    const startX = scene.scale.width / 2 - ((cols - 1) * (buttonSize + padding)) / 2;
-    const startY = panelY + 70;
+    let selectedBid: number | null = null;
+    const keyStates = new Map<number, {
+        bg: Phaser.GameObjects.Graphics;
+        text: Phaser.GameObjects.Text;
+        interactive: Phaser.GameObjects.Rectangle;
+        disabled: boolean;
+        drawButton: (state: 'normal' | 'hover' | 'selected' | 'disabled') => void;
+    }>();
 
-    for (let bid = 1; bid <= maxBid; bid += 1) {
-        const index = bid - 1;
-        const col = index % cols;
-        const row = Math.floor(index / cols);
-        const x = startX + col * (buttonSize + padding);
-        const y = startY + row * (buttonSize + padding);
+    // Keyboard layout
+    const buttons: (Phaser.GameObjects.Graphics | Phaser.GameObjects.Text | Phaser.GameObjects.Rectangle)[] = [];
+    const buttonSize = 80;
+    const buttonGap = 8;
+    const keypadStartY = panelY + 60;
+    const keypadStartX = panelX + (panelWidth - (3 * buttonSize + 2 * buttonGap)) / 2;
 
-        const button = scene.add.text(x, y, `${bid}`, {
-            fontSize: '18px',
+    // Confirm button (created early so key handlers can reference it)
+    const confirmButtonY = panelY + 60 + (buttonSize + buttonGap) * 3 + 10;
+    const confirmButtonWidth = 3 * buttonSize + 2 * buttonGap;
+    const confirmButtonHeight = 50;
+
+    const confirmBg = scene.add.graphics();
+    const drawConfirmButton = (state: 'normal' | 'hover' | 'press') => {
+        confirmBg.clear();
+
+        switch (state) {
+            case 'press': confirmBg.fillStyle(0x059669, 1); break;
+            case 'hover': confirmBg.fillStyle(0x10b981, 1); break;
+            default: confirmBg.fillStyle(0x10b981, 1); break;
+        }
+        
+        confirmBg.fillRoundedRect(keypadStartX, confirmButtonY, confirmButtonWidth, confirmButtonHeight, 12);
+        if (state === 'hover') {
+            confirmBg.strokeRoundedRect(keypadStartX, confirmButtonY, confirmButtonWidth, confirmButtonHeight, 12);
+        }
+    };
+    drawConfirmButton('normal');
+
+    const confirmText = scene.add.text(
+        keypadStartX + confirmButtonWidth / 2,
+        confirmButtonY + confirmButtonHeight / 2,
+        'Confirm Bid',
+        {
+            fontSize: '20px',
             color: '#ffffff',
-            backgroundColor: '#444444',
-            padding: { left: 12, right: 12, top: 8, bottom: 8 }
-        }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+            fontStyle: 'bold'
+        }
+    ).setOrigin(0.5);
 
-        button.on('pointerdown', () => onSelect(bid));
-        button.on('pointerover', () => button.setStyle({ backgroundColor: '#666666' }));
-        button.on('pointerout', () => button.setStyle({ backgroundColor: '#444444' }));
-        buttons.push(button);
-    }
+    const confirmButton = scene.add.container(0, 0, [confirmBg, confirmText]);
+    confirmButton.setAlpha(0).setScale(0.9).setVisible(false);
 
-    container.add([overlay, panel, title, ...buttons]);
+    const confirmHitArea = new Phaser.Geom.Rectangle(0, 0, confirmButtonWidth, confirmButtonHeight);
+    const confirmInteractive = scene.add.rectangle(keypadStartX, confirmButtonY, confirmButtonWidth, confirmButtonHeight, 0xffffff, 0.001)
+        .setOrigin(0, 0)
+        .setInteractive({
+            hitArea: confirmHitArea,
+            hitAreaCallback: Phaser.Geom.Rectangle.Contains,
+            useHandCursor: true
+        });
+    confirmInteractive.setVisible(false);
+
+    const setConfirmVisible = (visible: boolean) => {
+        confirmButton.setVisible(visible);
+        confirmInteractive.setVisible(visible);
+        if (visible) {
+            confirmButton.setAlpha(1).setScale(1);
+        }
+    };
+
+    confirmInteractive.on('pointerdown', () => {
+        if (selectedBid !== null) {
+            drawConfirmButton('press');
+            scene.time.delayedCall(150, () => {
+                onSelect(selectedBid!);
+            });
+        }
+    });
+
+    confirmInteractive.on('pointerover', () => {
+        drawConfirmButton('hover');
+    });
+
+    confirmInteractive.on('pointerout', () => {
+        drawConfirmButton('normal');
+        scene.tweens.add({
+            targets: confirmButton,
+            scale: 1,
+            duration: 100,
+            ease: 'Cubic.easeOut'
+        });
+    });
+
+    const createKey = (x: number, y: number, value: number, isWide = false) => {
+        const width = isWide ? buttonSize * 2 + buttonGap : buttonSize;
+        const height = buttonSize;
+        const isDisabled = value > maxBid;
+
+        const bg = scene.add.graphics();
+        const drawButton = (state: 'normal' | 'hover' | 'selected' | 'disabled') => {
+            bg.clear();
+            
+            if (state === 'disabled') {
+                bg.fillStyle(0x9ca3af, 0.3);
+                bg.fillRoundedRect(x, y, width, height, 12);
+            } else if (state === 'selected') {
+                bg.fillStyle(0x10b981, 1);
+                bg.lineStyle(3, 0x059669, 1);
+                bg.fillRoundedRect(x, y, width, height, 12);
+                bg.strokeRoundedRect(x, y, width, height, 12);
+            } else if (state === 'hover') {
+                bg.fillStyle(0xe5e7eb, 1);
+                bg.lineStyle(2, 0xd1d5db, 1);
+                bg.fillRoundedRect(x, y, width, height, 12);
+                bg.strokeRoundedRect(x, y, width, height, 12);
+            } else {
+                bg.fillStyle(0xffffff, 1);
+                bg.fillRoundedRect(x, y, width, height, 12);
+            }
+        };
+        
+        drawButton(isDisabled ? 'disabled' : 'normal');
+
+        const text = scene.add.text(x + width / 2, y + height / 2, `${value}`, {
+            fontSize: '24px',
+            color: isDisabled ? '#6b7280' : '#1f2937',
+            fontStyle: 'bold'
+        }).setOrigin(0.5);
+
+        const hitArea = new Phaser.Geom.Rectangle(0, 0, width, height);
+        const interactive = scene.add.rectangle(x, y, width, height, 0xffffff, 0.001)
+            .setOrigin(0, 0)
+            .setInteractive({
+                hitArea,
+                hitAreaCallback: Phaser.Geom.Rectangle.Contains,
+                useHandCursor: !isDisabled
+            });
+
+        keyStates.set(value, { bg, text, interactive, disabled: isDisabled, drawButton });
+
+        if (!isDisabled) {
+            interactive.on('pointerdown', () => {
+                if (selectedBid !== null && selectedBid !== value) {
+                    const prevKey = keyStates.get(selectedBid);
+                    if (prevKey && !prevKey.disabled) {
+                        prevKey.drawButton('normal');
+                        prevKey.text.setColor('#1f2937');
+                    }
+                }
+
+                selectedBid = value;
+                drawButton('selected');
+                text.setColor('#ffffff');
+
+                // Show confirm button
+                setConfirmVisible(true);
+                scene.tweens.add({
+                    targets: confirmButton,
+                    alpha: 1,
+                    scale: 1,
+                    duration: 200,
+                    ease: 'Back.easeOut'
+                });
+            });
+
+            interactive.on('pointerover', () => {
+                if (selectedBid !== value) {
+                    drawButton('hover');
+                }
+            });
+
+            interactive.on('pointerout', () => {
+                if (selectedBid !== value) {
+                    drawButton('normal');
+                }
+            });
+        } else {
+            interactive.disableInteractive();
+        }
+
+        buttons.push(bg, text, interactive);
+    };
+
+    // Row 1: [0 wide] [1]
+    createKey(keypadStartX, keypadStartY, 0, true);
+    createKey(keypadStartX + 2 * buttonSize + 2 * buttonGap, keypadStartY, 1);
+
+    // Row 2: [2] [3] [4]
+    const row2Y = keypadStartY + buttonSize + buttonGap;
+    createKey(keypadStartX, row2Y, 2);
+    createKey(keypadStartX + buttonSize + buttonGap, row2Y, 3);
+    createKey(keypadStartX + 2 * (buttonSize + buttonGap), row2Y, 4);
+
+    // Row 3: [5] [6] [7]
+    const row3Y = row2Y + buttonSize + buttonGap;
+    createKey(keypadStartX, row3Y, 5);
+    createKey(keypadStartX + buttonSize + buttonGap, row3Y, 6);
+    createKey(keypadStartX + 2 * (buttonSize + buttonGap), row3Y, 7);
+
+    container.add([overlay, panel, title, ...buttons, confirmButton, confirmInteractive]);
     container.setDepth(100);
     return container;
 }
@@ -536,26 +703,28 @@ export function renderTrumpCardNextToDeck(
 
 export function renderTrickCards(
     scene: Phaser.Scene,
-    cards: Card[],
+    cardsWithPositions: Array<{ card: Card; position: PlayerAnchorPosition }>,
     previous: CardSprite[] = []
 ): CardSprite[] {
     previous.forEach((sprite) => sprite.destroy());
 
-    if (!cards.length) {
+    if (!cardsWithPositions.length) {
         return [];
     }
 
     const centerX = scene.scale.width / 2;
     const centerY = scene.scale.height / 2 - 10;
-    const offsets = [
-        { x: 0, y: -50, angle: 0 },
-        { x: -60, y: 0, angle: -8 },
-        { x: 60, y: 0, angle: 8 },
-        { x: 0, y: 60, angle: 0 }
-    ];
+    
+    // Map player positions to card offsets
+    const offsetMap: Record<PlayerAnchorPosition, { x: number; y: number; angle: number }> = {
+        'top': { x: 0, y: -50, angle: 0 },
+        'left': { x: -60, y: 0, angle: -8 },
+        'right': { x: 60, y: 0, angle: 8 },
+        'bottom': { x: 0, y: 60, angle: 0 }
+    };
 
-    return cards.map((card, index) => {
-        const offset = offsets[index] ?? { x: index * 6, y: index * 6, angle: 0 };
+    return cardsWithPositions.map(({ card, position }, index) => {
+        const offset = offsetMap[position] ?? { x: index * 6, y: index * 6, angle: 0 };
         const sprite = new CardSprite(
             scene,
             centerX + offset.x,

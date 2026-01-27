@@ -3,7 +3,7 @@ import { createBidBubble, createBidModal, createDrawPile, createMenuButtons, cre
 import { CARD_SCALE } from '@/lib/common';
 import { Card, createDeck, shuffleDeck } from '@/lib/deck';
 import { getParticipants, getState, isHost, myPlayer, onPlayerJoin, PlayerState, setState } from 'playroomkit';
-import { deserializeCards, GameLogic, serializeCards, SerializedCard } from '@/lib/gameLogic';
+import { deserializeCards, GameLogic, serializeCards, SerializedCard, delay } from '@/lib/gameLogic';
 import { CardSprite } from '@/lib/cardSprite';
 import { PlayerBot } from '@/player/Bot';
 
@@ -54,6 +54,7 @@ export class Game extends Scene
     private botTurnDelayMs = 500;
     private botBidDelayMs = 200;
     private isAnimatingTrickWin = false;
+    private isHandDisabledForBid = false;
 
     constructor() { super('Game'); }
 
@@ -72,7 +73,7 @@ export class Game extends Scene
             setState('hostId', localPlayer.id);
         }
 
-        const { drawButton, pileX, pileY, drawPileCards } = createDrawPile(scene, () => {
+        const { drawButton, pileX, pileY, drawPileCards } = createDrawPile(scene, async () => {
             if (!isHost()) {
                 console.log('[Deal] Non-host clicked draw; ignored.');
                 return;
@@ -110,15 +111,19 @@ export class Game extends Scene
             setState('biddingOrder', turnOrder);
             setState('biddingIndex', 0);
             setState('currentBidPlayerId', hostId);
-            setState('biddingPhase', true);
             const nextDealId = (getState('dealId') ?? 0) + 1;
             setState('dealId', nextDealId);
+
             console.log('[Deal] State committed', { dealId: nextDealId });
 
             this.deckAnchor = moveDrawPileToTopLeft(this, this.drawPileCards);
             this.trumpCardSprite = renderTrumpCardNextToDeck(this, trumpCard ?? null, this.trumpCardSprite, this.deckAnchor);
 
             drawButton.destroy();
+
+            setState('biddingPhase', false);
+            await delay(3000);
+            setState('biddingPhase', true);
         });
 
         this.pileX = pileX;
@@ -169,8 +174,14 @@ export class Game extends Scene
         if (trickVersion !== this.lastTrickVersion && !this.isAnimatingTrickWin) {
             this.lastTrickVersion = trickVersion;
             const trickCards = (getState('trickCards') as Array<{ playerId: string; card: SerializedCard }>) ?? [];
-            const cards = trickCards.map((entry) => deserializeCards([entry.card])[0]);
-            this.trickSprites = renderTrickCards(this, cards, this.trickSprites);
+            const localId = myPlayer().id;
+            const cardsWithPositions = trickCards.map((entry) => {
+                const [card] = deserializeCards([entry.card]);
+                const anchor = this.playerAnchors[entry.playerId];
+                const position = entry.playerId === localId ? 'bottom' : (anchor?.position ?? 'top');
+                return { card, position };
+            });
+            this.trickSprites = renderTrickCards(this, cardsWithPositions, this.trickSprites);
         }
 
         this.updateBiddingUI();
@@ -320,12 +331,15 @@ export class Game extends Scene
         if (biddingPhase && currentBidPlayerId === localId && myPlayer().getState('bid') == null) {
             if (!this.bidModal) {
                 const maxBid = this.myHand.length;
+                
                 this.bidModal = createBidModal(this, maxBid, (bid) => this.submitBid(bid));
             }
         } else if (this.bidModal) {
             this.bidModal.destroy();
             this.bidModal = undefined;
         }
+
+        this.setHandDisabledForBid(Boolean(this.bidModal));
 
         Object.values(getParticipants()).forEach((player) => {
             const bid = player.getState('bid') as number | null;
@@ -337,6 +351,27 @@ export class Game extends Scene
             }
             this.lastBids[player.id] = bid ?? null;
         });
+    }
+
+    private setHandDisabledForBid(disabled: boolean): void {
+        if (disabled === this.isHandDisabledForBid) {
+            if (disabled) {
+                this.handSprites.forEach((sprite) => sprite.markAsDisabled());
+            }
+            return;
+        }
+
+        this.isHandDisabledForBid = disabled;
+
+        if (disabled) {
+            this.handSprites.forEach((sprite) => sprite.markAsDisabled());
+        } else {
+            this.handSprites.forEach((sprite) => {
+                sprite.clearTint();
+                sprite.enableInteractions();
+            });
+            this.attachHandInteractions(this.handSprites);
+        }
     }
 
     private submitBid(bid: number): void {
