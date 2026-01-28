@@ -156,6 +156,26 @@ export class GameLogic {
         return winner.playerId;
     }
 
+    checkIfCardIsPlayable(
+        card: Card,
+        hand: Card[],
+        trick: { playerId: string; card: Card }[] = []
+    ): boolean {
+        const leadSuit = trick[0]?.card.suit;
+
+        if (!leadSuit) {
+            return true; // first to lead can play any card
+        }
+
+        const hasLeadSuit = hand.some((handCard) => handCard.suit === leadSuit);
+
+        if (!hasLeadSuit) {
+            return true; // no card in hand matches lead suit
+        }
+
+        return card.suit === leadSuit; // must follow suit if possible
+    }
+
     isRoundComplete(): boolean {
         // check if any player still has cards
         for (const hand of this.hands.values()) {

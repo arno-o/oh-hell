@@ -147,6 +147,8 @@ export class Game extends Scene
             Object.entries(this.playerAnchors).forEach(([playerId, anchor]) => {
                 anchor.turnHighlight?.setAlpha(playerId === currentTurnPlayerId ? 1 : 0);
             });
+
+            this.updatePlayableCards();
         }
 
         const dealId = getState('dealId') ?? 0;
@@ -186,6 +188,7 @@ export class Game extends Scene
                 return { card, position };
             });
             this.trickSprites = renderTrickCards(this, cardsWithPositions, this.trickSprites);
+            this.updatePlayableCards();
         }
 
         this.updateBiddingUI();
@@ -221,6 +224,7 @@ export class Game extends Scene
         // refresh hand ui
         this.handSprites = renderPlayerHand(this, this.myHand, this.handSprites);
         this.attachHandInteractions(this.handSprites);
+    this.updatePlayableCards();
 
         // update trick state
         const existingTrick = (getState('trickCards') as Array<{ playerId: string; card: SerializedCard }> ?? []);
@@ -381,6 +385,38 @@ export class Game extends Scene
             sprite.clearTint();
             sprite.enableInteractions();
         });
+        this.attachHandInteractions(this.handSprites);
+        this.updatePlayableCards();
+    }
+
+    private updatePlayableCards(): void {
+        if (!this.handSprites.length) return;
+        if (this.isHandDisabledForBid || this.isHandDisabledForDelay) return;
+
+        const currentTurnPlayerId = getState('currentTurnPlayerId') as string | undefined;
+        const localId = myPlayer().id;
+
+        if (currentTurnPlayerId && currentTurnPlayerId !== localId) {
+            this.handSprites.forEach((sprite) => sprite.markAsDisabled(true));
+            return;
+        }
+
+        const trickCards = (getState('trickCards') as Array<{ playerId: string; card: SerializedCard }>) ?? [];
+        const deserializedTrick = trickCards.map((entry) => ({
+            playerId: entry.playerId,
+            card: deserializeCards([entry.card])[0]
+        }));
+
+        this.handSprites.forEach((sprite) => {
+            const playable = this.logic.checkIfCardIsPlayable(sprite.cardData, this.myHand, deserializedTrick);
+            if (!playable) {
+                sprite.markAsDisabled(true);
+            } else {
+                sprite.clearTint();
+                sprite.enableInteractions();
+            }
+        });
+
         this.attachHandInteractions(this.handSprites);
     }
 
