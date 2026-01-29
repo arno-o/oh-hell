@@ -1,4 +1,4 @@
-import { ASSET_KEYS, CARD_BACK_FRAME, CARD_HEIGHT, CARD_SCALE, CARD_WIDTH } from '@/lib/common';
+import { ASSET_KEYS, CARD_BACK_FRAME, CARD_HEIGHT, CARD_SCALE, CARD_WIDTH, CARD_SUIT_COLOR, CARD_SUIT_TO_COLOR } from '@/lib/common';
 import { PlayerState } from 'playroomkit';
 import { MENU_ITEMS } from '@/lib/common';
 import { Card } from '@/lib/card';
@@ -13,6 +13,17 @@ export type PlayerAnchor = {
     position: PlayerAnchorPosition;
     turnHighlight?: Phaser.GameObjects.Graphics;
 };
+
+/**
+ * Delay helper for UI flows (uses Phaser's clock).
+ * @param scene - The active Phaser scene.
+ * @param ms - Duration of delay in milliseconds.
+ */
+export function delayUi(scene: Phaser.Scene, ms: number): Promise<void> {
+    return new Promise((resolve) => {
+        scene.time.delayedCall(ms, () => resolve());
+    });
+}
 
 // -- draw pile
 export function createDrawPile(scene: Phaser.Scene, onDraw?: () => void): {
@@ -38,7 +49,8 @@ export function renderPlayerHand(
     scene: Phaser.Scene,
     cards: Card[],
     previous: CardSprite[] = [],
-    options?: { from?: { x: number; y: number }; staggerMs?: number }
+    options?: { from?: { x: number; y: number }; staggerMs?: number },
+    onFinishedAnimation?: () => void
 ): CardSprite[] {
     previous.forEach((sprite) => sprite.destroy());
 
@@ -56,6 +68,8 @@ export function renderPlayerHand(
 
     const from = options?.from;
     const staggerMs = options?.staggerMs ?? 60;
+
+    const lastIndex = cards.length - 1;
 
     return cards.map((card, index) => {
         const x = startX + spacing * index;
@@ -89,6 +103,10 @@ export function renderPlayerHand(
                     sprite.originalY = handY;
                     sprite.originalAngle = angle;
                     sprite.setOriginalDepth(index);
+
+                    if (index === lastIndex) {
+                        onFinishedAnimation?.();
+                    }
                 }
             });
         }
@@ -652,6 +670,80 @@ export function createTurnText(scene: Phaser.Scene): Phaser.GameObjects.Text {
     }).setOrigin(0.5, 0);
 }
 
+export function animateTrumpSelection(
+    scene: Phaser.Scene,
+    trumpCard: Card | null,
+    drawPileCards: Phaser.GameObjects.Image[],
+    onFinishedAnimation?: () => void
+) {
+    if (!trumpCard || !drawPileCards.length) {
+        onFinishedAnimation?.();
+        return;
+    }
+
+    const anchor = drawPileCards[0];
+    const startX = anchor.x;
+    const startY = anchor.y;
+    const cardWidth = CARD_WIDTH * CARD_SCALE;
+
+    const sprite = new CardSprite(scene, startX, startY, ASSET_KEYS.CARDS, getCardFrame(trumpCard), trumpCard, CARD_SCALE);
+    sprite.setDepth(12);
+    sprite.setAlpha(0);
+
+    showTrumpCardText(scene, trumpCard, { x: startX, y: startY });
+
+    scene.tweens.add({
+        targets: sprite,
+        x: startX + cardWidth * 0.65,
+        y: startY,
+        alpha: 1,
+        angle: -8,
+        duration: 700,
+        ease: 'Cubic.easeOut',
+        onComplete: () => {
+            onFinishedAnimation?.();
+            sprite.destroy();
+        }
+    });
+}
+
+let trumpCardText: Phaser.GameObjects.Container | null = null;
+
+function showTrumpCardText(scene: Phaser.Scene, trumpCard: Card | null, anchor?: { x: number; y: number }) {
+    if (!trumpCard) { return; }
+
+    trumpCardText?.destroy();
+    trumpCardText = null;
+
+    const centerX = scene.scale.width / 2;
+    const centerY = scene.scale.height / 2 - 260;
+
+    const prefix = 'The trump suit is ';
+    const suitLabel = trumpCard.suit;
+    const suitColorKey = CARD_SUIT_TO_COLOR[suitLabel];
+    const isRedSuit = suitColorKey === CARD_SUIT_COLOR.RED;
+    const suitColor = isRedSuit ? '#ef4444' : '#111111';
+
+    const prefixText = scene.add.text(0, 0, prefix, {
+        fontSize: '25px',
+        color: '#ffffff',
+        fontStyle: 'bold'
+    }).setOrigin(0, 0.5);
+
+    const suitText = scene.add.text(0, 0, suitLabel, {
+        fontSize: '25px',
+        color: suitColor,
+        fontStyle: '900'
+    }).setOrigin(0, 0.5);
+
+    const totalWidth = prefixText.width + suitText.width;
+    prefixText.setX(-totalWidth / 2);
+    suitText.setX(-totalWidth / 2 + prefixText.width);
+
+    trumpCardText = scene.add.container(centerX, centerY, [prefixText, suitText]);
+    trumpCardText.setDepth(15);
+}
+
 export function moveDrawPileToTopLeft(
     scene: Phaser.Scene,
     drawPileCards: Phaser.GameObjects.Image[]
@@ -665,6 +757,17 @@ export function moveDrawPileToTopLeft(
     const cardHeight = CARD_HEIGHT * CARD_SCALE;
     const targetX = cardWidth / 2 + margin;
     const targetY = cardHeight / 2 + margin;
+
+    if (trumpCardText) {
+        scene.tweens.add({
+            targets: trumpCardText,
+            x: targetX + 80,
+            y: targetY + 90,
+            scale: 0.70,
+            duration: 300,
+            ease: 'Cubic.easeOut'
+        });
+    }
 
     drawPileCards.forEach((card, index) => {
         scene.tweens.add({

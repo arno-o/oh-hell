@@ -1,5 +1,5 @@
 import { Scene } from 'phaser';
-import { createBidBubble, createBidModal, createDrawPile, createMenuButtons, createOtherPlayersUI, createPlayerUI, moveDrawPileToTopLeft, PlayerAnchor, renderPlayerHand, renderTrickCards, renderTrumpCardNextToDeck } from '@/lib/ui';
+import { animateTrumpSelection, createBidBubble, createBidModal, createDrawPile, createMenuButtons, createOtherPlayersUI, createPlayerUI, moveDrawPileToTopLeft, PlayerAnchor, renderPlayerHand, renderTrickCards, renderTrumpCardNextToDeck } from '@/lib/ui';
 import { CARD_SCALE } from '@/lib/common';
 import { Card, createDeck, shuffleDeck } from '@/lib/deck';
 import { getParticipants, getState, isHost, myPlayer, onPlayerJoin, PlayerState, setState } from 'playroomkit';
@@ -131,17 +131,10 @@ export class Game extends Scene
 
             console.log('[Deal] State committed', { dealId: nextDealId });
 
-            this.deckAnchor = moveDrawPileToTopLeft(this, this.drawPileCards);
-            this.trumpCardSprite = renderTrumpCardNextToDeck(this, trumpCard ?? null, this.trumpCardSprite, this.deckAnchor);
-
             drawButton.destroy();
 
             setState('biddingPhase', false);
             this.setHandDisabledForDelay(true);
-            this.safeDelayedCall(3000, () => {
-                this.setHandDisabledForDelay(false);
-                setState('biddingPhase', true);
-            });
         });
 
         this.pileX = pileX;
@@ -177,24 +170,35 @@ export class Game extends Scene
         if (dealId !== this.lastDealId) {
             console.log('[Deal] Detected new dealId', { previous: this.lastDealId, current: dealId });
             this.lastDealId = dealId;
+
+            // Prepare Trump Card data first
+            const trumpState = getState('trumpCard') as SerializedCard | null;
+            let trumpCard: Card | null = null;
+            if (trumpState) {
+                [trumpCard] = deserializeCards([trumpState]);
+            }
+
             const handState = myPlayer().getState('hand') as SerializedCard[] | undefined;
             if (!handState || !handState.length) {
                 console.log('[Deal] No hand state found for player');
             } else {
                 this.myHand = deserializeCards(handState);
                 console.log('[Deal] Rendering hand', { cards: this.myHand.length });
-                this.handSprites = renderPlayerHand(this, this.myHand, this.handSprites, {
-                    from: { x: this.pileX, y: this.pileY },
-                    staggerMs: 70
-                });
-                this.attachHandInteractions(this.handSprites);
-                this.setHandDisabledForDelay(this.isHandDisabledForDelay);
-            }
+                
+                this.handSprites = renderPlayerHand(this, this.myHand, this.handSprites, { from: { x: this.pileX, y: this.pileY }, staggerMs: 120 }, () => {
+                    animateTrumpSelection(this, trumpCard, this.drawPileCards, () => {
+                        this.deckAnchor = moveDrawPileToTopLeft(this, this.drawPileCards);
+                        this.trumpCardSprite = renderTrumpCardNextToDeck(this, trumpCard ?? null, this.trumpCardSprite, this.deckAnchor);
 
-            const trumpState = getState('trumpCard') as SerializedCard | null;
-            if (trumpState) {
-                const [trumpCard] = deserializeCards([trumpState]);
-                this.trumpCardSprite = renderTrumpCardNextToDeck(this, trumpCard, this.trumpCardSprite, this.deckAnchor);
+                        this.safeDelayedCall(2000, () => {
+                            this.setHandDisabledForDelay(false);
+                            setState('biddingPhase', true);
+                        });
+                    });
+                });
+                
+                this.attachHandInteractions(this.handSprites);
+                this.setHandDisabledForDelay(true);
             }
         }
 

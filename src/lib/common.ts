@@ -26,13 +26,13 @@ export const ASSET_KEYS = {
     CARDS: 'CARDS'
 } as const;
 
-export type CardSuit = keyof typeof CARD_SUIT;
+export type CardSuit = typeof CARD_SUIT[keyof typeof CARD_SUIT];
 
 export const CARD_SUIT = {
-    HEART: 'HEART',
-    DIAMOND: 'DIAMOND',
-    SPADE: 'SPADE',
-    CLUB: 'CLUB'
+    HEART: 'HEARTS',
+    DIAMOND: 'DIAMONDS',
+    SPADE: 'SPADES',
+    CLUB: 'CLUBS'
 } as const;
 
 export type CardValue = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13;
