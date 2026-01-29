@@ -3,7 +3,7 @@ import { createBidBubble, createBidModal, createDrawPile, createMenuButtons, cre
 import { CARD_SCALE } from '@/lib/common';
 import { Card, createDeck, shuffleDeck } from '@/lib/deck';
 import { getParticipants, getState, isHost, myPlayer, onPlayerJoin, PlayerState, setState } from 'playroomkit';
-import { deserializeCards, GameLogic, serializeCards, SerializedCard, delay } from '@/lib/gameLogic';
+import { deserializeCards, GameLogic, serializeCards, SerializedCard } from '@/lib/gameLogic';
 import { CardSprite } from '@/lib/cardSprite';
 import { PlayerBot } from '@/player/Bot';
 
@@ -12,21 +12,13 @@ type BotCapablePlayer = PlayerState & {
     bot?: PlayerBot;
 };
 
-let players: PlayerState[] = [];
-
-onPlayerJoin(async (player) => {
-    const existing = players.find(p => p.id === player.id);
-    if (!existing) {
-        players.push(player);
-    }
-})
-
 export class Game extends Scene
 {
     // -- Game State --
     private deck: Card[];
     private logic: GameLogic;
     private myHand: Card[] = [];
+    private players: PlayerState[] = [];
 
     // -- Visual Elements --
     private handSprites: CardSprite[] = [];
@@ -59,16 +51,38 @@ export class Game extends Scene
 
     constructor() { super('Game'); }
 
+    init() {
+        this.players = Object.values(getParticipants());
+        
+        onPlayerJoin(async (player) => {
+            const existing = this.players.find(p => p.id === player.id);
+            if (!existing) {
+                this.players.push(player);
+            }
+        });
+    }
+
     create ()
     {
+        this.events.on(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this);
+
         this.cameras.main.setBackgroundColor('#074924');
         this.deck = shuffleDeck(createDeck());
         this.runGameSetup(this);
     }
 
+    shutdown() {
+        this.handSprites = [];
+        this.trickSprites = [];
+        this.botPendingAction.clear();
+        this.botNextActionAt.clear();
+        this.players = [];
+        this.events.off(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this);
+    }
+
     runGameSetup(scene: Phaser.Scene): void {
         const localPlayer = myPlayer();
-        this.logic = new GameLogic(this.deck, players.map((player) => player.id));
+        this.logic = new GameLogic(this.deck, this.players.map((player) => player.id));
 
         if (isHost()) {
             setState('hostId', localPlayer.id);
@@ -92,7 +106,7 @@ export class Game extends Scene
                 remainingDeck: this.logic.getRemainingDeck().length
             });
 
-            players.forEach((player) => {
+            this.players.forEach((player) => {
                 const hand = hands?.get(player.id) ?? [];
                 player.setState('hand', serializeCards(hand));
                 player.setState('handCount', hand.length);
@@ -105,7 +119,7 @@ export class Game extends Scene
             setState('trumpSuit', trumpSuit);
             setState('trumpCard', trumpCard ? serializeCards([trumpCard])[0] : null);
             const hostId = getState('hostId') ?? localPlayer.id;
-            const turnOrder = this.getTurnOrder(players.map((player) => player.id), hostId);
+            const turnOrder = this.getTurnOrder(this.players.map((player) => player.id), hostId);
             setState('turnOrder', turnOrder);
             setState('turnIndex', 0);
             setState('currentTurnPlayerId', hostId);
@@ -124,9 +138,10 @@ export class Game extends Scene
 
             setState('biddingPhase', false);
             this.setHandDisabledForDelay(true);
-            await delay(3000);
-            this.setHandDisabledForDelay(false);
-            setState('biddingPhase', true);
+            this.safeDelayedCall(3000, () => {
+                this.setHandDisabledForDelay(false);
+                setState('biddingPhase', true);
+            });
         });
 
         this.pileX = pileX;
@@ -134,9 +149,16 @@ export class Game extends Scene
         this.drawPileCards = drawPileCards;
 
         const localAnchor = createPlayerUI(scene, localPlayer);
-        const otherAnchors = createOtherPlayersUI(scene, players, localPlayer.id);
+        const otherAnchors = createOtherPlayersUI(scene, this.players, localPlayer.id);
         this.playerAnchors = { [localPlayer.id]: localAnchor, ...otherAnchors };
         createMenuButtons(scene);
+    }
+
+    private safeDelayedCall(delay: number, callback: () => void) {
+        if (!this.scene.isActive()) return;
+        this.time.delayedCall(delay, () => {
+            if (this.scene.isActive()) callback();
+        });
     }
 
     update(): void {
@@ -457,7 +479,7 @@ export class Game extends Scene
         const round = (getState('round') as number | undefined) ?? 1;
         const participantCount = Object.keys(getParticipants()).length;
 
-        players.forEach((player) => {
+        this.players.forEach((player) => {
             const botPlayer = player as BotCapablePlayer;
             if (!botPlayer.isBot()) return;
 
@@ -581,7 +603,7 @@ export class Game extends Scene
     }
 
     private shouldDelayForPlayer(playerId: string): boolean {
-        const player = players.find((p) => p.id === playerId) as BotCapablePlayer | undefined;
+        const player = this.players.find((p) => p.id === playerId) as BotCapablePlayer | undefined;
         if (!player || typeof player.isBot !== 'function') return false;
         return player.isBot();
     }
@@ -615,7 +637,7 @@ export class Game extends Scene
         const trumpCard = this.logic.getRemainingDeck()[0];
 
         // reset all player states
-        players.forEach((player) => {
+        this.players.forEach((player) => {
             const hand = hands?.get(player.id) ?? [];
             player.setState('hand', serializeCards(hand));
             player.setState('handCount', hand.length);
@@ -630,7 +652,7 @@ export class Game extends Scene
         setState('trumpCard', trumpCard ? serializeCards([trumpCard])[0] : null);
         
         const hostId = getState('hostId') ?? myPlayer().id;
-        const turnOrder = this.getTurnOrder(players.map((player) => player.id), hostId);
+        const turnOrder = this.getTurnOrder(this.players.map((player) => player.id), hostId);
         setState('turnOrder', turnOrder);
         setState('biddingOrder', turnOrder);
         setState('biddingIndex', 0);
