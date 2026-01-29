@@ -690,7 +690,7 @@ export function animateTrumpSelection(
     sprite.setDepth(12);
     sprite.setAlpha(0);
 
-    showTrumpCardText(scene, trumpCard, { x: startX, y: startY });
+    showTrumpCardText(scene, trumpCard);
 
     scene.tweens.add({
         targets: sprite,
@@ -709,7 +709,7 @@ export function animateTrumpSelection(
 
 let trumpCardText: Phaser.GameObjects.Container | null = null;
 
-function showTrumpCardText(scene: Phaser.Scene, trumpCard: Card | null, anchor?: { x: number; y: number }) {
+function showTrumpCardText(scene: Phaser.Scene, trumpCard: Card | null) {
     if (!trumpCard) { return; }
 
     trumpCardText?.destroy();
