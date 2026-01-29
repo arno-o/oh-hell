@@ -156,22 +156,16 @@ export class GameLogic {
         return winner.playerId;
     }
 
-    checkIfCardIsPlayable(
-        card: Card,
-        hand: Card[],
-        trick: { playerId: string; card: Card }[] = []
-    ): boolean {
+    checkIfCardIsPlayable(card: Card, hand: Card[], trick: { playerId: string; card: Card }[] = []): boolean {
         const leadSuit = trick[0]?.card.suit;
 
-        if (!leadSuit) {
-            return true; // first to lead can play any card
-        }
+        // first to lead can play any card
+        if (!leadSuit) { return true; }
 
         const hasLeadSuit = hand.some((handCard) => handCard.suit === leadSuit);
 
-        if (!hasLeadSuit) {
-            return true; // no card in hand matches lead suit
-        }
+        // no card in hand matches lead suit
+        if (!hasLeadSuit) { return true; }
 
         return card.suit === leadSuit; // must follow suit if possible
     }
