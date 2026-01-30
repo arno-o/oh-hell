@@ -1,4 +1,4 @@
-import { ASSET_KEYS, CARD_BACK_FRAME, CARD_HEIGHT, CARD_SCALE, CARD_WIDTH, CARD_SUIT_COLOR, CARD_SUIT_TO_COLOR } from '@/lib/common';
+import { ASSET_KEYS, CARD_BACK_FRAME, CARD_HEIGHT, CARD_SCALE, CARD_WIDTH, CARD_SUIT_COLOR, CARD_SUIT_TO_COLOR, MenuItemId } from '@/lib/common';
 import { PlayerState } from 'playroomkit';
 import { MENU_ITEMS } from '@/lib/common';
 import { Card } from '@/lib/card';
@@ -348,7 +348,7 @@ export function createButton(scene: Phaser.Scene, x: number, y: number, label: s
     return button;
 }
 
-export function createMenuButtons(scene: Phaser.Scene) {
+export function createMenuButtons(scene: Phaser.Scene, actions: Partial<Record<MenuItemId, () => void>> = {}) {
     const buttonSize = 40;
     const spacing = 15;
     const iconScale = 0.6;
@@ -387,7 +387,7 @@ export function createMenuButtons(scene: Phaser.Scene) {
             useHandCursor: true
         });
 
-        container.on('pointerdown', () => item.action());
+        container.on('pointerdown', () => actions[item.id]?.() ?? console.log(`[Menu] ${item.label} clicked`));
         container.on('pointerover', () => {
             drawBg(bg, 0xdddddd);
             label.setVisible(true);
@@ -399,6 +399,86 @@ export function createMenuButtons(scene: Phaser.Scene) {
 
         x += buttonSize + spacing;
     });
+}
+
+export type ChatWindow = {
+    container: Phaser.GameObjects.Container;
+    messagesText: Phaser.GameObjects.Text;
+    inputText: Phaser.GameObjects.Text;
+    closeButton: Phaser.GameObjects.Text;
+};
+
+export function createChatWindow(
+    scene: Phaser.Scene,
+    options: { onClose: () => void; title?: string; width?: number; height?: number } 
+): ChatWindow {
+    const width = options.width ?? 360;
+    const height = options.height ?? 320;
+    const panelX = scene.scale.width - width - 24;
+    const panelY = 80;
+    const padding = 14;
+    const headerHeight = 28;
+    const inputHeight = 40;
+
+    const container = scene.add.container(0, 0);
+
+    const panel = scene.add.graphics();
+    panel.fillStyle(0x111827, 0.95);
+    panel.lineStyle(2, 0x4b5563, 1);
+    panel.fillRoundedRect(panelX, panelY, width, height, 12);
+    panel.strokeRoundedRect(panelX, panelY, width, height, 12);
+    container.add(panel);
+
+    const title = scene.add.text(panelX + padding, panelY + padding, options.title ?? 'Lobby Chat', {
+        fontSize: '16px',
+        color: '#f9fafb',
+        fontStyle: 'bold'
+    });
+    container.add(title);
+
+    const closeButton = scene.add.text(panelX + width - padding, panelY + padding - 2, '×', {
+        fontSize: '20px',
+        color: '#e5e7eb'
+    }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
+    closeButton.on('pointerdown', () => options.onClose());
+    container.add(closeButton);
+
+    const messagesPanelY = panelY + padding + headerHeight;
+    const messagesHeight = height - headerHeight - inputHeight - padding * 2;
+    const messagesBg = scene.add.graphics();
+    messagesBg.fillStyle(0x1f2937, 0.9);
+    messagesBg.fillRoundedRect(panelX + padding, messagesPanelY, width - padding * 2, messagesHeight, 10);
+    container.add(messagesBg);
+
+    const messagesText = scene.add.text(panelX + padding + 8, messagesPanelY + 8, '', {
+        fontSize: '13px',
+        color: '#e5e7eb',
+        wordWrap: { width: width - padding * 2 - 16 }
+    });
+    container.add(messagesText);
+
+    const inputY = panelY + height - inputHeight - padding;
+    const inputBg = scene.add.graphics();
+    inputBg.fillStyle(0x111827, 1);
+    inputBg.lineStyle(1, 0x4b5563, 1);
+    inputBg.fillRoundedRect(panelX + padding, inputY, width - padding * 2, inputHeight, 10);
+    inputBg.strokeRoundedRect(panelX + padding, inputY, width - padding * 2, inputHeight, 10);
+    container.add(inputBg);
+
+    const inputText = scene.add.text(panelX + padding + 10, inputY + 10, 'Type a message…', {
+        fontSize: '13px',
+        color: '#9ca3af'
+    });
+    container.add(inputText);
+
+    container.setDepth(120);
+
+    return {
+        container,
+        messagesText,
+        inputText,
+        closeButton
+    };
 }
 
 export function createBidBubble(

@@ -1,19 +1,21 @@
+export type MenuItemId = 'chat' | 'settings';
+
 export interface MenuItem {
+    id: MenuItemId;
     icon: string;
     label: string;
-    action: () => void;
 }
 
 export const MENU_ITEMS: MenuItem[] = [
     {
+        id: 'chat',
         icon: 'icon-chat',
-        label: 'Chat',
-        action: () => console.log('Chat clicked'),
+        label: 'Chat'
     },
     {
+        id: 'settings',
         icon: 'icon-settings',
-        label: 'Settings',
-        action: () => console.log('Settings clicked'),
+        label: 'Settings'
     },
 ];
 

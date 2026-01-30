@@ -1,11 +1,12 @@
 import { Scene } from 'phaser';
-import { animateTrumpSelection, createBidBubble, createBidModal, createDrawPile, createMenuButtons, createOtherPlayersUI, createPlayerUI, moveDrawPileToTopLeft, PlayerAnchor, renderPlayerHand, renderTrickCards, renderTrumpCardNextToDeck } from '@/lib/ui';
+import { animateTrumpSelection, ChatWindow, createBidBubble, createBidModal, createChatWindow, createDrawPile, createMenuButtons, createOtherPlayersUI, createPlayerUI, moveDrawPileToTopLeft, PlayerAnchor, renderPlayerHand, renderTrickCards, renderTrumpCardNextToDeck } from '@/lib/ui';
 import { CARD_SCALE } from '@/lib/common';
 import { Card, createDeck, shuffleDeck } from '@/lib/deck';
 import { getParticipants, getState, isHost, myPlayer, onPlayerJoin, PlayerState, setState } from 'playroomkit';
 import { deserializeCards, GameLogic, serializeCards, SerializedCard } from '@/lib/gameLogic';
 import { CardSprite } from '@/lib/cardSprite';
 import { PlayerBot } from '@/player/Bot';
+import { appendChatMessage, CHAT_MAX_LENGTH, formatChatMessages, getChatMessages, getChatVersion, normalizeChatText } from '@/lib/chat';
 
 type BotCapablePlayer = PlayerState & {
     isBot: () => boolean;
@@ -33,6 +34,11 @@ export class Game extends Scene
     private deckAnchor = { x: 0, y: 0 };
     private pileX = 0;
     private pileY = 0;
+    private chatWindow?: ChatWindow;
+    private chatOpen = false;
+    private chatInputBuffer = '';
+    private chatLastVersion = 0;
+    private chatKeyHandler?: (event: KeyboardEvent) => void;
 
     // -- State Tracking --
     private lastDealId = 0;
@@ -77,6 +83,7 @@ export class Game extends Scene
         this.botPendingAction.clear();
         this.botNextActionAt.clear();
         this.players = [];
+        this.closeChatWindow();
         this.events.off(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this);
     }
 
@@ -144,7 +151,10 @@ export class Game extends Scene
         const localAnchor = createPlayerUI(scene, localPlayer);
         const otherAnchors = createOtherPlayersUI(scene, this.players, localPlayer.id);
         this.playerAnchors = { [localPlayer.id]: localAnchor, ...otherAnchors };
-        createMenuButtons(scene);
+        createMenuButtons(scene, {
+            chat: () => this.toggleChatWindow(),
+            settings: () => console.log('[Menu] Settings clicked')
+        });
     }
 
     private safeDelayedCall(delay: number, callback: () => void) {
@@ -218,7 +228,107 @@ export class Game extends Scene
         }
 
         this.updateBiddingUI();
+        this.updateChatFromState();
         this.updateBots();
+    }
+
+    private toggleChatWindow(): void {
+        if (this.chatOpen) {
+            this.closeChatWindow();
+        } else {
+            this.openChatWindow();
+        }
+    }
+
+    private openChatWindow(): void {
+        if (this.chatOpen) return;
+
+        this.chatOpen = true;
+        this.chatInputBuffer = '';
+
+        this.chatWindow = createChatWindow(this, {
+            onClose: () => this.closeChatWindow()
+        });
+
+        this.refreshChatMessages();
+        this.updateChatInputText();
+
+        const keyboard = this.input.keyboard;
+        if (keyboard) {
+            this.chatKeyHandler = (event: KeyboardEvent) => this.handleChatKeydown(event);
+            keyboard.on('keydown', this.chatKeyHandler);
+        }
+    }
+
+    private closeChatWindow(): void {
+        if (!this.chatOpen) return;
+        this.chatOpen = false;
+
+        if (this.chatWindow) {
+            this.chatWindow.container.destroy();
+            this.chatWindow = undefined;
+        }
+
+        if (this.chatKeyHandler && this.input.keyboard) {
+            this.input.keyboard.off('keydown', this.chatKeyHandler);
+        }
+
+        this.chatKeyHandler = undefined;
+        this.chatInputBuffer = '';
+    }
+
+    private handleChatKeydown(event: KeyboardEvent): void {
+        if (!this.chatOpen) return;
+
+        if (event.key === 'Escape') {
+            this.closeChatWindow();
+            return;
+        }
+
+        if (event.key === 'Enter') {
+            const trimmed = normalizeChatText(this.chatInputBuffer);
+            if (trimmed) {
+                appendChatMessage(trimmed, myPlayer());
+                this.chatInputBuffer = '';
+                this.updateChatInputText();
+                this.refreshChatMessages();
+            }
+            return;
+        }
+
+        if (event.key === 'Backspace') {
+            this.chatInputBuffer = this.chatInputBuffer.slice(0, -1);
+            this.updateChatInputText();
+            return;
+        }
+
+        if (event.key.length === 1) {
+            if (this.chatInputBuffer.length >= CHAT_MAX_LENGTH) return;
+            this.chatInputBuffer += event.key;
+            this.updateChatInputText();
+        }
+    }
+
+    private updateChatFromState(): void {
+        const version = getChatVersion();
+        if (version !== this.chatLastVersion) {
+            this.chatLastVersion = version;
+            this.refreshChatMessages();
+        }
+    }
+
+    private refreshChatMessages(): void {
+        if (!this.chatWindow) return;
+        const messages = getChatMessages();
+        this.chatWindow.messagesText.setText(formatChatMessages(messages));
+    }
+
+    private updateChatInputText(): void {
+        if (!this.chatWindow) return;
+        const isEmpty = this.chatInputBuffer.length === 0;
+        this.chatWindow.inputText
+            .setText(isEmpty ? 'Type a message…' : this.chatInputBuffer)
+            .setColor(isEmpty ? '#9ca3af' : '#f9fafb');
     }
 
     private attachHandInteractions(sprites: CardSprite[]): void {
