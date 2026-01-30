@@ -6,7 +6,7 @@ import { getParticipants, getState, isHost, myPlayer, onPlayerJoin, PlayerState,
 import { deserializeCards, GameLogic, serializeCards, SerializedCard } from '@/lib/gameLogic';
 import { CardSprite } from '@/lib/cardSprite';
 import { PlayerBot } from '@/player/Bot';
-import { appendChatMessage, CHAT_MAX_LENGTH, formatChatMessages, getChatMessages, getChatVersion, normalizeChatText } from '@/lib/chat';
+import { appendChatMessage, CHAT_MAX_LENGTH, getChatMessages, getChatVersion, normalizeChatText } from '@/lib/chat';
 
 type BotCapablePlayer = PlayerState & {
     isBot: () => boolean;
@@ -39,6 +39,10 @@ export class Game extends Scene
     private chatInputBuffer = '';
     private chatLastVersion = 0;
     private chatKeyHandler?: (event: KeyboardEvent) => void;
+    private chatPointerHandler?: (pointer: Phaser.Input.Pointer) => void;
+    private chatIgnoreNextPointer = false;
+    private chatInputFocused = false;
+    private chatMessageNodes: Phaser.GameObjects.Text[] = [];
 
     // -- State Tracking --
     private lastDealId = 0;
@@ -245,10 +249,38 @@ export class Game extends Scene
 
         this.chatOpen = true;
         this.chatInputBuffer = '';
+        this.chatInputFocused = false;
+    this.chatIgnoreNextPointer = true;
 
         this.chatWindow = createChatWindow(this, {
             onClose: () => this.closeChatWindow()
         });
+        this.setChatInputFocus(false);
+
+        this.chatWindow.inputHitArea.on('pointerdown', () => {
+            this.setChatInputFocus(true);
+        });
+
+        this.chatPointerHandler = (pointer: Phaser.Input.Pointer) => {
+            if (!this.chatWindow) return;
+            if (this.chatIgnoreNextPointer) {
+                this.chatIgnoreNextPointer = false;
+                return;
+            }
+            const panelBounds = this.chatWindow.panelBounds;
+            if (!panelBounds.contains(pointer.x, pointer.y)) {
+                this.closeChatWindow();
+                return;
+            }
+
+            const inputBounds = this.chatWindow.inputHitArea.getBounds();
+            if (inputBounds.contains(pointer.x, pointer.y)) {
+                this.setChatInputFocus(true);
+            } else {
+                this.setChatInputFocus(false);
+            }
+        };
+        this.input.on('pointerdown', this.chatPointerHandler);
 
         this.refreshChatMessages();
         this.updateChatInputText();
@@ -263,10 +295,19 @@ export class Game extends Scene
     private closeChatWindow(): void {
         if (!this.chatOpen) return;
         this.chatOpen = false;
+        this.setChatInputFocus(false);
 
         if (this.chatWindow) {
+            this.chatWindow.inputHitArea.off('pointerdown');
             this.chatWindow.container.destroy();
             this.chatWindow = undefined;
+        }
+
+        this.chatMessageNodes = [];
+
+        if (this.chatPointerHandler) {
+            this.input.off('pointerdown', this.chatPointerHandler);
+            this.chatPointerHandler = undefined;
         }
 
         if (this.chatKeyHandler && this.input.keyboard) {
@@ -275,15 +316,23 @@ export class Game extends Scene
 
         this.chatKeyHandler = undefined;
         this.chatInputBuffer = '';
+        this.chatIgnoreNextPointer = false;
+    }
+
+    private setChatInputFocus(focused: boolean): void {
+        this.chatInputFocused = focused;
+        if (this.chatWindow) {
+            this.chatWindow.drawInputBg(focused);
+        }
     }
 
     private handleChatKeydown(event: KeyboardEvent): void {
-        if (!this.chatOpen) return;
-
         if (event.key === 'Escape') {
             this.closeChatWindow();
             return;
         }
+
+        if (!this.chatOpen || !this.chatInputFocused) return;
 
         if (event.key === 'Enter') {
             const trimmed = normalizeChatText(this.chatInputBuffer);
@@ -320,7 +369,35 @@ export class Game extends Scene
     private refreshChatMessages(): void {
         if (!this.chatWindow) return;
         const messages = getChatMessages();
-        this.chatWindow.messagesText.setText(formatChatMessages(messages));
+        const visibleMessages = messages.slice(-12);
+
+        this.chatMessageNodes.forEach((node) => node.destroy());
+        this.chatMessageNodes = [];
+
+        const container = this.chatWindow.messagesContainer;
+        let y = 0;
+        const gap = 8;
+        const maxWidth = this.chatWindow.messagesBounds.width;
+
+        visibleMessages.forEach((message) => {
+            const nameText = this.add.text(0, y, `${message.playerName}:`, {
+                fontSize: '13px',
+                fontStyle: 'bold',
+                color: message.color ?? '#f9fafb'
+            });
+
+            const messageText = this.add.text(nameText.width + 6, y, message.text, {
+                fontSize: '13px',
+                color: '#e5e7eb',
+                wordWrap: { width: Math.max(60, maxWidth - nameText.width - 6) }
+            });
+
+            container.add([nameText, messageText]);
+            this.chatMessageNodes.push(nameText, messageText);
+
+            const rowHeight = Math.max(nameText.height, messageText.height);
+            y += rowHeight + gap;
+        });
     }
 
     private updateChatInputText(): void {

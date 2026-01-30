@@ -403,8 +403,13 @@ export function createMenuButtons(scene: Phaser.Scene, actions: Partial<Record<M
 
 export type ChatWindow = {
     container: Phaser.GameObjects.Container;
-    messagesText: Phaser.GameObjects.Text;
+    messagesContainer: Phaser.GameObjects.Container;
+    messagesBounds: Phaser.Geom.Rectangle;
+    panelBounds: Phaser.Geom.Rectangle;
     inputText: Phaser.GameObjects.Text;
+    inputBg: Phaser.GameObjects.Graphics;
+    drawInputBg: (focused: boolean) => void;
+    inputHitArea: Phaser.GameObjects.Rectangle;
     closeButton: Phaser.GameObjects.Text;
 };
 
@@ -419,6 +424,7 @@ export function createChatWindow(
     const padding = 14;
     const headerHeight = 28;
     const inputHeight = 40;
+    const inputGap = 10;
 
     const container = scene.add.container(0, 0);
 
@@ -444,26 +450,47 @@ export function createChatWindow(
     container.add(closeButton);
 
     const messagesPanelY = panelY + padding + headerHeight;
-    const messagesHeight = height - headerHeight - inputHeight - padding * 2;
+    const messagesHeight = height - headerHeight - inputHeight - padding * 2 - inputGap;
     const messagesBg = scene.add.graphics();
     messagesBg.fillStyle(0x1f2937, 0.9);
     messagesBg.fillRoundedRect(panelX + padding, messagesPanelY, width - padding * 2, messagesHeight, 10);
     container.add(messagesBg);
 
-    const messagesText = scene.add.text(panelX + padding + 8, messagesPanelY + 8, '', {
-        fontSize: '13px',
-        color: '#e5e7eb',
-        wordWrap: { width: width - padding * 2 - 16 }
-    });
-    container.add(messagesText);
+    const messagesContainer = scene.add.container(panelX + padding + 8, messagesPanelY + 8);
+    container.add(messagesContainer);
+    const messagesBounds = new Phaser.Geom.Rectangle(
+        panelX + padding + 8,
+        messagesPanelY + 8,
+        width - padding * 2 - 16,
+        messagesHeight - 16
+    );
 
     const inputY = panelY + height - inputHeight - padding;
     const inputBg = scene.add.graphics();
-    inputBg.fillStyle(0x111827, 1);
-    inputBg.lineStyle(1, 0x4b5563, 1);
-    inputBg.fillRoundedRect(panelX + padding, inputY, width - padding * 2, inputHeight, 10);
-    inputBg.strokeRoundedRect(panelX + padding, inputY, width - padding * 2, inputHeight, 10);
+    const drawInputBg = (fillColor: number) => {
+        inputBg.clear();
+        inputBg.fillStyle(fillColor, 1);
+        inputBg.lineStyle(1, 0x4b5563, 1);
+        inputBg.fillRoundedRect(panelX + padding, inputY, width - padding * 2, inputHeight, 10);
+        inputBg.strokeRoundedRect(panelX + padding, inputY, width - padding * 2, inputHeight, 10);
+    };
+    drawInputBg(0x111827);
     container.add(inputBg);
+
+    const drawInputState = (focused: boolean) => {
+        drawInputBg(focused ? 0x0f172a : 0x111827);
+    };
+
+    const inputHitArea = scene.add.rectangle(
+        panelX + padding,
+        inputY,
+        width - padding * 2,
+        inputHeight,
+        0xffffff,
+        0.001
+    ).setOrigin(0, 0);
+    inputHitArea.setInteractive({ cursor: 'text' });
+    container.add(inputHitArea);
 
     const inputText = scene.add.text(panelX + padding + 10, inputY + 10, 'Type a message…', {
         fontSize: '13px',
@@ -473,10 +500,17 @@ export function createChatWindow(
 
     container.setDepth(120);
 
+    const panelBounds = new Phaser.Geom.Rectangle(panelX, panelY, width, height);
+
     return {
         container,
-        messagesText,
+        messagesContainer,
+        messagesBounds,
+        panelBounds,
         inputText,
+        inputBg,
+        drawInputBg: drawInputState,
+        inputHitArea,
         closeButton
     };
 }

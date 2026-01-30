@@ -6,6 +6,7 @@ export type ChatMessage = {
     playerName: string;
     text: string;
     timestamp: number;
+    color?: string;
 };
 
 const CHAT_STATE_KEY = 'chatMessages';
@@ -31,12 +32,17 @@ export function appendChatMessage(text: string, player: PlayerState): ChatMessag
         return getChatMessages();
     }
 
+    const accentValue = player.getProfile().color?.hex;
+    const accentColor = typeof accentValue === 'number'
+        ? `#${accentValue.toString(16).padStart(6, '0')}`
+        : accentValue;
     const message: ChatMessage = {
         id: `${player.id}-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
         playerId: player.id,
         playerName: player.getProfile().name,
         text: normalized,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        color: accentColor
     };
 
     const nextMessages = [...getChatMessages(), message].slice(-CHAT_MAX_MESSAGES);
