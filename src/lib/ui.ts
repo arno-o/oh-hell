@@ -464,6 +464,11 @@ export function createChatWindow(
         width - padding * 2 - 16,
         messagesHeight - 16
     );
+    const messagesMaskShape = scene.add.graphics();
+    messagesMaskShape.fillStyle(0xffffff, 1);
+    messagesMaskShape.fillRect(messagesBounds.x, messagesBounds.y, messagesBounds.width, messagesBounds.height);
+    messagesContainer.setMask(messagesMaskShape.createGeometryMask());
+    messagesMaskShape.setVisible(false);
 
     const inputY = panelY + height - inputHeight - padding;
     const inputBg = scene.add.graphics();

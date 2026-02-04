@@ -369,35 +369,60 @@ export class Game extends Scene
     private refreshChatMessages(): void {
         if (!this.chatWindow) return;
         const messages = getChatMessages();
-        const visibleMessages = messages.slice(-12);
 
         this.chatMessageNodes.forEach((node) => node.destroy());
         this.chatMessageNodes = [];
 
         const container = this.chatWindow.messagesContainer;
-        let y = 0;
         const gap = 8;
-        const maxWidth = this.chatWindow.messagesBounds.width;
+    const maxWidth = this.chatWindow.messagesBounds.width;
+    const maxHeight = this.chatWindow.messagesBounds.height;
 
-        visibleMessages.forEach((message) => {
-            const nameText = this.add.text(0, y, `${message.playerName}:`, {
+        const items: Array<{
+            nameText: Phaser.GameObjects.Text;
+            messageText: Phaser.GameObjects.Text;
+            rowHeight: number;
+        }> = [];
+
+        let usedHeight = 0;
+
+        for (let i = messages.length - 1; i >= 0; i -= 1) {
+            const message = messages[i];
+
+            const nameText = this.add.text(0, 0, `${message.playerName}:`, {
                 fontSize: '13px',
                 fontStyle: 'bold',
                 color: message.color ?? '#f9fafb'
             });
 
-            const messageText = this.add.text(nameText.width + 6, y, message.text, {
+            const messageText = this.add.text(nameText.width + 6, 0, message.text, {
                 fontSize: '13px',
                 color: '#e5e7eb',
                 wordWrap: { width: Math.max(60, maxWidth - nameText.width - 6) }
             });
 
-            container.add([nameText, messageText]);
-            this.chatMessageNodes.push(nameText, messageText);
-
             const rowHeight = Math.max(nameText.height, messageText.height);
-            y += rowHeight + gap;
-        });
+            const nextHeight = usedHeight + rowHeight + (items.length ? gap : 0);
+            if (nextHeight > maxHeight) {
+                nameText.destroy();
+                messageText.destroy();
+                break;
+            }
+
+            usedHeight = nextHeight;
+            items.push({ nameText, messageText, rowHeight });
+        }
+
+        let y = Math.max(0, maxHeight - usedHeight);
+
+        for (let i = items.length - 1; i >= 0; i -= 1) {
+            const item = items[i];
+            item.nameText.setPosition(0, y);
+            item.messageText.setPosition(item.nameText.width + 6, y);
+            container.add([item.nameText, item.messageText]);
+            this.chatMessageNodes.push(item.nameText, item.messageText);
+            y += item.rowHeight + gap;
+        }
     }
 
     private updateChatInputText(): void {
