@@ -342,6 +342,7 @@ export class Game extends Scene
                 this.updateChatInputText();
                 this.refreshChatMessages();
             }
+            this.sound.play(ASSET_KEYS.AUDIO_CHAT_POST, {volume: 0.3});
             return;
         }
 
@@ -545,6 +546,8 @@ export class Game extends Scene
         if (!anchor) return;
 
         this.isAnimatingTrickWin = true;
+
+        this.sound.play(ASSET_KEYS.AUDIO_TRUMP_MOVE, { volume: 0.3 });
 
         if (anchor.turnHighlight) {
             anchor.turnHighlight.setAlpha(1);

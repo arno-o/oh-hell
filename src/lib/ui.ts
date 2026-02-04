@@ -98,6 +98,9 @@ export function renderPlayerHand(
                 duration: 350,
                 delay: index * staggerMs,
                 ease: 'Cubic.easeOut',
+                onStart: () => {
+                    scene.sound.play(ASSET_KEYS.AUDIO_CARD_SPREAD, { volume: 0.3 });
+                },
                 onComplete: () => {
                     sprite.originalX = x;
                     sprite.originalY = handY;
@@ -392,7 +395,7 @@ export function createMenuButtons(scene: Phaser.Scene, actions: Partial<Record<M
 
         container.on('pointerdown', () => {
             actions[item.id]?.();
-            scene.sound.play(ASSET_KEYS.AUDIO_BUTTON_2, { volume: 0.4 }) ?? console.log(`[Menu] ${item.label} clicked`);
+            scene.sound.play(ASSET_KEYS.AUDIO_UI_CLICK, { volume: 0.4 }) ?? console.log(`[Menu] ${item.label} clicked`);
         });
         container.on('pointerover', () => {
             drawBg(bg, 0xdddddd);
