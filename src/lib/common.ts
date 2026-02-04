@@ -25,7 +25,15 @@ export const CARD_SCALE = 2.5;
 export const CARD_BACK_FRAME = 53;
 
 export const ASSET_KEYS = {
-    CARDS: 'CARDS'
+    CARDS: 'CARDS',
+    AUDIO_BUTTON_1: 'AUDIO_BUTTON_1',
+    AUDIO_BUTTON_2: 'AUDIO_BUTTON_2',
+    AUDIO_BUTTON_3: 'AUDIO_BUTTON_3',
+    AUDIO_CARD_1: 'AUDIO_CARD_1',
+    AUDIO_CARD_2: 'AUDIO_CARD_2',
+    AUDIO_ROUND_WIN: 'AUDIO_ROUND_WIN',
+    AUDIO_TRUMP_MOVE: 'AUDIO_TRUMP_MOVE',
+    AUDIO_CARD_SPREAD: 'AUDIO_CARD_SPREAD',
 } as const;
 
 export type CardSuit = typeof CARD_SUIT[keyof typeof CARD_SUIT];

@@ -341,7 +341,10 @@ export function createButton(scene: Phaser.Scene, x: number, y: number, label: s
         .setPadding(10)
         .setStyle({ backgroundColor: '#111', fontSize: '24px' })
         .setInteractive({ useHandCursor: true })
-        .on('pointerdown', () => onClick())
+        .on('pointerdown', () => {
+            scene.sound.play(ASSET_KEYS.AUDIO_BUTTON_3, { volume: 0.3 });
+            onClick();
+        })
         .on('pointerover', () => button.setStyle({ fill: '#f39c12' }))
         .on('pointerout', () => button.setStyle({ fill: '#FFF' }));
 
@@ -387,7 +390,10 @@ export function createMenuButtons(scene: Phaser.Scene, actions: Partial<Record<M
             useHandCursor: true
         });
 
-        container.on('pointerdown', () => actions[item.id]?.() ?? console.log(`[Menu] ${item.label} clicked`));
+        container.on('pointerdown', () => {
+            actions[item.id]?.();
+            scene.sound.play(ASSET_KEYS.AUDIO_BUTTON_2, { volume: 0.4 }) ?? console.log(`[Menu] ${item.label} clicked`);
+        });
         container.on('pointerover', () => {
             drawBg(bg, 0xdddddd);
             label.setVisible(true);
@@ -651,6 +657,7 @@ export function createBidModal(scene: Phaser.Scene, maxBid: number, onSelect: (b
     confirmInteractive.on('pointerdown', () => {
         if (selectedBid !== null) {
             drawConfirmButton('press');
+            scene.sound.play(ASSET_KEYS.AUDIO_BUTTON_3, { volume: 0.3 })
             scene.time.delayedCall(150, () => {
                 onSelect(selectedBid!);
             });
@@ -721,6 +728,7 @@ export function createBidModal(scene: Phaser.Scene, maxBid: number, onSelect: (b
         if (!isDisabled) {
             interactive.on('pointerdown', () => {
                 if (selectedBid !== null && selectedBid !== value) {
+                    scene.sound.play(ASSET_KEYS.AUDIO_BUTTON_1, { volume: 0.3 })
                     const prevKey = keyStates.get(selectedBid);
                     if (prevKey && !prevKey.disabled) {
                         prevKey.drawButton('normal');
@@ -876,6 +884,8 @@ export function moveDrawPileToTopLeft(
     const cardHeight = CARD_HEIGHT * CARD_SCALE;
     const targetX = cardWidth / 2 + margin;
     const targetY = cardHeight / 2 + margin;
+
+    scene.sound.play(ASSET_KEYS.AUDIO_TRUMP_MOVE);
 
     if (trumpCardText) {
         scene.tweens.add({

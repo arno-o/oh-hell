@@ -1,6 +1,6 @@
 import { Scene } from 'phaser';
 import { animateTrumpSelection, ChatWindow, createBidBubble, createBidModal, createChatWindow, createDrawPile, createMenuButtons, createOtherPlayersUI, createPlayerUI, moveDrawPileToTopLeft, PlayerAnchor, renderPlayerHand, renderTrickCards, renderTrumpCardNextToDeck } from '@/lib/ui';
-import { CARD_SCALE } from '@/lib/common';
+import { ASSET_KEYS, CARD_SCALE } from '@/lib/common';
 import { Card, createDeck, shuffleDeck } from '@/lib/deck';
 import { getParticipants, getState, isHost, myPlayer, onPlayerJoin, PlayerState, setState } from 'playroomkit';
 import { deserializeCards, GameLogic, serializeCards, SerializedCard } from '@/lib/gameLogic';
@@ -250,7 +250,7 @@ export class Game extends Scene
         this.chatOpen = true;
         this.chatInputBuffer = '';
         this.chatInputFocused = false;
-    this.chatIgnoreNextPointer = true;
+        this.chatIgnoreNextPointer = true;
 
         this.chatWindow = createChatWindow(this, {
             onClose: () => this.closeChatWindow()
@@ -443,6 +443,7 @@ export class Game extends Scene
     }
 
     private playCard(sprite: CardSprite): void {
+        this.sound.play(ASSET_KEYS.AUDIO_CARD_2, {volume: 0.3});
         const currentTurnPlayerId = getState('currentTurnPlayerId') as string;
         const localId = myPlayer().id;
 
@@ -462,7 +463,7 @@ export class Game extends Scene
         // refresh hand ui
         this.handSprites = renderPlayerHand(this, this.myHand, this.handSprites);
         this.attachHandInteractions(this.handSprites);
-    this.updatePlayableCards();
+        this.updatePlayableCards();
 
         // update trick state
         const existingTrick = (getState('trickCards') as Array<{ playerId: string; card: SerializedCard }> ?? []);
@@ -592,6 +593,7 @@ export class Game extends Scene
             if (this.lastBids[player.id] !== bid && bid != null) {
                 const anchor = this.playerAnchors[player.id];
                 if (anchor) {
+                    this.sound.play(ASSET_KEYS.AUDIO_BUTTON_2, {volume: 0.3});
                     this.bidBubbles[player.id] = createBidBubble(this, anchor, bid, this.bidBubbles[player.id]);
                 }
             }
@@ -792,6 +794,8 @@ export class Game extends Scene
 
         const existingTrick = (getState('trickCards') as Array<{ playerId: string; card: SerializedCard }> ?? []);
         const updatedTrick = [...existingTrick, { playerId: player.id, card }];
+
+        this.sound.play(ASSET_KEYS.AUDIO_CARD_2, {volume: 0.3});
 
         setState('trickCards', updatedTrick);
         setState('trickVersion', (getState('trickVersion') ?? 0) + 1);
