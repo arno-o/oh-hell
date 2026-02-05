@@ -12,6 +12,7 @@ export type PlayerAnchor = {
     y: number;
     position: PlayerAnchorPosition;
     turnHighlight?: Phaser.GameObjects.Graphics;
+    bidText?: Phaser.GameObjects.Text;
 };
 
 /**
@@ -272,14 +273,6 @@ function createSidePlayerUI(scene: Phaser.Scene, player: PlayerState, position: 
     });
     bidLabel.setOrigin(0, 0.5);
 
-    const bidValue = '--';
-    const bidText = scene.add.text(0, bidLabelY, bidValue, {
-        fontSize: '14px',
-        color: '#ffffff',
-        fontStyle: 'bold'
-    });
-    bidText.setOrigin(0.5, 0.5);
-
     const bidBgWidth = 40;
     const bidBgHeight = 20;
     const bidBgX = bidLabelX + 28;
@@ -287,6 +280,14 @@ function createSidePlayerUI(scene: Phaser.Scene, player: PlayerState, position: 
     const bidBg = scene.add.graphics();
     bidBg.fillStyle(0x2a2f3a, 1);
     bidBg.fillRoundedRect(bidBgX, bidBgY, bidBgWidth, bidBgHeight, 8);
+
+    const bidValue = '--';
+    const bidText = scene.add.text(0, bidLabelY, bidValue, {
+        fontSize: '14px',
+        color: '#ffffff',
+        fontStyle: 'bold'
+    });
+    bidText.setOrigin(0.5, 0.5);
 
     bidText.setX(bidBgX + bidBgWidth / 2);
 
@@ -300,7 +301,8 @@ function createSidePlayerUI(scene: Phaser.Scene, player: PlayerState, position: 
             x: panelX + panelWidth + 16,
             y: panelY + panelHeight / 2,
             position: 'left',
-            turnHighlight
+            turnHighlight,
+            bidText
         };
     }
 
@@ -309,7 +311,8 @@ function createSidePlayerUI(scene: Phaser.Scene, player: PlayerState, position: 
             x: panelX - 16,
             y: panelY + panelHeight / 2,
             position: 'right',
-            turnHighlight
+            turnHighlight,
+            bidText
         };
     }
 
@@ -317,7 +320,8 @@ function createSidePlayerUI(scene: Phaser.Scene, player: PlayerState, position: 
         x: panelX + panelWidth / 2,
         y: panelY + panelHeight + 16,
         position: 'top',
-        turnHighlight
+        turnHighlight,
+        bidText
     };
 }
 

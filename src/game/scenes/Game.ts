@@ -53,6 +53,7 @@ export class Game extends Scene
     private lastBidsVersion = 0;
     private lastBiddingPhase = false;
     private lastBidPlayerId?: string;
+    private lastBidTrickVersion = 0;
     private lastRoundSummaryVersion = 0;
     private botNextActionAt: Map<string, number> = new Map();
     private botBaseDelayMs = 500;
@@ -63,6 +64,8 @@ export class Game extends Scene
     private isAnimatingTrickWin = false;
     private isHandDisabledForBid = false;
     private isHandDisabledForDelay = false;
+    private pollTimer?: Phaser.Time.TimerEvent;
+    private uiPollMs = 100;
 
     constructor() { super('Game'); }
 
@@ -88,6 +91,18 @@ export class Game extends Scene
         this.cameras.main.setBackgroundColor('#074924');
         this.deck = shuffleDeck(createDeck());
         this.runGameSetup(this);
+
+        this.pollTimer = this.time.addEvent({
+            delay: this.uiPollMs,
+            loop: true,
+            callback: () => {
+                if (!this.scene.isActive()) return;
+                this.updateBiddingUI();
+                this.updateRoundSummaryUI();
+                this.updateChatFromState();
+                this.updateBots();
+            }
+        });
     }
 
     shutdown() {
@@ -97,6 +112,10 @@ export class Game extends Scene
         this.botNextActionAt.clear();
         this.players = [];
         this.closeChatWindow();
+        if (this.pollTimer) {
+            this.pollTimer.remove(false);
+            this.pollTimer = undefined;
+        }
         this.events.off(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this);
     }
 
@@ -247,10 +266,6 @@ export class Game extends Scene
             this.updatePlayableCards();
         }
 
-        this.updateBiddingUI();
-        this.updateRoundSummaryUI();
-        this.updateChatFromState();
-        this.updateBots();
     }
 
     private toggleChatWindow(): void {
@@ -595,11 +610,15 @@ export class Game extends Scene
         const localId = myPlayer().id;
         const currentBidPlayerId = getState('currentBidPlayerId') as string | undefined;
         const bidsVersion = (getState('bidsVersion') as number | undefined) ?? 0;
+        const trickVersion = (getState('trickVersion') as number | undefined) ?? 0;
+        const trickCards = (getState('trickCards') as Array<{ playerId: string; card: SerializedCard }>) ?? [];
+        const hasTrickStarted = trickCards.length > 0;
 
         const shouldUpdate =
             biddingPhase !== this.lastBiddingPhase ||
             currentBidPlayerId !== this.lastBidPlayerId ||
-            bidsVersion !== this.lastBidsVersion;
+            bidsVersion !== this.lastBidsVersion ||
+            trickVersion !== this.lastBidTrickVersion;
 
         if (!shouldUpdate) {
             return;
@@ -622,13 +641,23 @@ export class Game extends Scene
             const bid = player.getState('bid') as number | null;
             const previous = this.lastBids[player.id];
             const anchor = this.playerAnchors[player.id];
+            const tricks = (getState(`tricks_${player.id}`) as number | undefined) ?? 0;
+
+            if (anchor?.bidText) {
+                anchor.bidText.setText(bid == null ? '--' : `${tricks}/${bid}`);
+            }
 
             if (bid == null && previous != null) {
                 this.bidBubbles[player.id]?.destroy();
                 this.bidBubbles[player.id] = undefined as unknown as Phaser.GameObjects.Container;
             }
 
-            if (this.lastBids[player.id] !== bid && bid != null && anchor) {
+            if (hasTrickStarted && this.bidBubbles[player.id]) {
+                this.bidBubbles[player.id].destroy();
+                this.bidBubbles[player.id] = undefined as unknown as Phaser.GameObjects.Container;
+            }
+
+            if (!hasTrickStarted && this.lastBids[player.id] !== bid && bid != null && anchor) {
                 this.sound.play(ASSET_KEYS.AUDIO_BUTTON_2, {volume: 0.3});
                 this.bidBubbles[player.id] = createBidBubble(this, anchor, bid, this.bidBubbles[player.id]);
             }
@@ -639,6 +668,7 @@ export class Game extends Scene
         this.lastBidsVersion = bidsVersion;
         this.lastBiddingPhase = biddingPhase;
         this.lastBidPlayerId = currentBidPlayerId;
+        this.lastBidTrickVersion = trickVersion;
     }
 
     private isRoundComplete(): boolean {
