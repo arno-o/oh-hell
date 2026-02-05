@@ -1,5 +1,6 @@
 import { Scene } from 'phaser';
 import { Card } from '@/lib/card';
+import { ASSET_KEYS } from './common';
 import { getCardName } from '@/lib/deck';
 
 export const HOVER_LIFT = 20;
@@ -17,6 +18,8 @@ export class CardSprite extends Phaser.GameObjects.Sprite {
     public baseScale: number = 1;
     private suppressHover: boolean = false;
 
+    private hoverSound!: Phaser.Sound.BaseSound;
+
     constructor(scene: Scene, x: number, y: number, texture: string, frame: string | number, cardData: Card, scale: number) {
         super(scene, x, y, texture, frame);
         
@@ -27,6 +30,7 @@ export class CardSprite extends Phaser.GameObjects.Sprite {
         this.baseScale = scale;
         
         this.setScale(scale);
+        this.hoverSound = this.scene.sound.add(ASSET_KEYS.AUDIO_CARD_1, {volume: 0.4});
         scene.add.existing(this);
     }
 
@@ -84,6 +88,9 @@ export class CardSprite extends Phaser.GameObjects.Sprite {
         if (!this.isDragging && !this.suppressHover) {
             this.isHovered = true;
             this.setDepth(1000);
+            if (!this.scene.sound.locked) {
+                this.hoverSound.play();
+            }
             this.scene.tweens.add({
                 targets: this,
                 y: this.originalY - HOVER_LIFT * 1.5,
