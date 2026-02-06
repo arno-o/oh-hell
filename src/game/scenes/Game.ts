@@ -1,5 +1,5 @@
 import { Scene } from 'phaser';
-import { animateTrumpSelection, ChatWindow, createBidBubble, createBidModal, createChatWindow, createDrawPile, createMenuButtons, createOtherPlayersUI, createPlayerUI, createRoundSummaryPanel, moveDrawPileToTopLeft, PlayerAnchor, renderPlayerHand, renderTrickCards, renderTrumpCardNextToDeck, RoundSummaryData } from '@/lib/ui';
+import { animateTrumpSelection, ChatWindow, createBidBubble, createBidModal, createChatWindow, createDrawPile, createMenuButtons, createOtherPlayersUI, createPlayerUI, createRoundSummaryPanel, createSidePlayerUI, moveDrawPileToTopLeft, PlayerAnchor, renderPlayerHand, renderTrickCards, renderTrumpCardNextToDeck, RoundSummaryData } from '@/lib/ui';
 import { ASSET_KEYS, CARD_SCALE } from '@/lib/common';
 import { Card, createDeck, shuffleDeck } from '@/lib/deck';
 import { getParticipants, getState, isHost, myPlayer, onPlayerJoin, PlayerState, setState } from 'playroomkit';
@@ -12,6 +12,14 @@ type BotCapablePlayer = PlayerState & {
     isBot: () => boolean;
     bot?: PlayerBot;
 };
+
+type PendingAction =
+    | { type: 'playCard'; card: SerializedCard; seq: number }
+    | { type: 'bid'; bid: number; seq: number };
+
+type PendingActionInput =
+    | { type: 'playCard'; card: SerializedCard }
+    | { type: 'bid'; bid: number };
 
 export class Game extends Scene
 {
@@ -55,6 +63,7 @@ export class Game extends Scene
     private lastBidPlayerId?: string;
     private lastBidTrickVersion = 0;
     private lastRoundSummaryVersion = 0;
+    private lastTrickWinVersion = 0;
     private botNextActionAt: Map<string, number> = new Map();
     private botBaseDelayMs = 500;
     private botRandomDelayMs = 400;
@@ -66,6 +75,9 @@ export class Game extends Scene
     private isHandDisabledForDelay = false;
     private pollTimer?: Phaser.Time.TimerEvent;
     private uiPollMs = 100;
+    private localActionSeq = 0;
+    private lastProcessedActionSeq: Map<string, number> = new Map();
+    private lastHandSignature = '';
 
     constructor() { super('Game'); }
 
@@ -80,6 +92,10 @@ export class Game extends Scene
 
             if (isHost() && player.getState('score') == null) {
                 player.setState('score', 0);
+            }
+
+            if (this.scene.isActive()) {
+                this.addPlayerAnchorForJoin(player);
             }
         });
     }
@@ -100,6 +116,7 @@ export class Game extends Scene
                 this.updateBiddingUI();
                 this.updateRoundSummaryUI();
                 this.updateChatFromState();
+                this.processPendingActions();
                 this.updateBots();
             }
         });
@@ -187,6 +204,10 @@ export class Game extends Scene
         this.pileY = pileY;
         this.drawPileCards = drawPileCards;
 
+        if (!isHost()) {
+            drawButton.destroy();
+        }
+
         const localAnchor = createPlayerUI(scene, localPlayer);
         const otherAnchors = createOtherPlayersUI(scene, this.players, localPlayer.id);
         this.playerAnchors = { [localPlayer.id]: localAnchor, ...otherAnchors };
@@ -204,6 +225,7 @@ export class Game extends Scene
     }
 
     update(): void {
+        this.syncLocalHandFromState();
         const currentTurnPlayerId = getState('currentTurnPlayerId') as string | undefined;
         if (currentTurnPlayerId && currentTurnPlayerId !== this.lastTurnPlayerId) {
             this.lastTurnPlayerId = currentTurnPlayerId;
@@ -232,6 +254,7 @@ export class Game extends Scene
                 console.log('[Deal] No hand state found for player');
             } else {
                 this.myHand = deserializeCards(handState);
+                this.lastHandSignature = JSON.stringify(handState);
                 console.log('[Deal] Rendering hand', { cards: this.myHand.length });
                 
                 this.handSprites = renderPlayerHand(this, this.myHand, this.handSprites, { from: { x: this.pileX, y: this.pileY }, staggerMs: 120 }, () => {
@@ -265,6 +288,8 @@ export class Game extends Scene
             this.trickSprites = renderTrickCards(this, cardsWithPositions, this.trickSprites);
             this.updatePlayableCards();
         }
+
+        this.syncTrickWinState();
 
     }
 
@@ -484,10 +509,19 @@ export class Game extends Scene
             return; // not your turn
         }
 
+        if (this.hasPendingAction()) {
+            return;
+        }
+
         const card = sprite.cardData;
         const cardIndex = this.myHand.findIndex((handCard) => handCard.suit === card.suit && handCard.value === card.value);
 
         if (cardIndex === -1) return;
+
+        if (!isHost()) {
+            this.queuePendingAction({ type: 'playCard', card: serializeCards([card])[0] });
+            return;
+        }
 
         this.myHand.splice(cardIndex, 1);
         myPlayer().setState('hand', serializeCards(this.myHand));
@@ -540,10 +574,8 @@ export class Game extends Scene
 
         const winnerId = this.logic.determineTrickWinner(deserializedTrick, trumpSuit);
 
-        // delay animation start to allow UI to render the complete trick first
-        this.time.delayedCall(1000, () => {
-            this.animateTrickWinner(winnerId);
-        });
+        setState('trickWinnerId', winnerId);
+        setState('trickWinVersion', (getState('trickWinVersion') ?? 0) + 1);
 
         this.time.delayedCall(1700, () => {
             // reset trick for everyone
@@ -816,7 +848,17 @@ export class Game extends Scene
     }
 
     private submitBid(bid: number): void {
+        if (this.hasPendingAction()) {
+            return;
+        }
+
         myPlayer().setState('bid', bid);
+
+        if (!isHost()) {
+            this.queuePendingAction({ type: 'bid', bid });
+            return;
+        }
+
         setState('bidsVersion', (getState('bidsVersion') ?? 0) + 1);
 
         const order = (getState('biddingOrder') as string[]) ?? [];
@@ -910,6 +952,9 @@ export class Game extends Scene
     }
 
     private submitBidForPlayer(player: PlayerState, bid: number): void {
+        const currentBidPlayerId = getState('currentBidPlayerId') as string | undefined;
+        if (currentBidPlayerId && currentBidPlayerId !== player.id) return;
+
         player.setState('bid', bid);
         setState('bidsVersion', (getState('bidsVersion') ?? 0) + 1);
 
@@ -983,6 +1028,95 @@ export class Game extends Scene
         const player = this.players.find((p) => p.id === playerId) as BotCapablePlayer | undefined;
         if (!player || typeof player.isBot !== 'function') return false;
         return player.isBot();
+    }
+
+    private addPlayerAnchorForJoin(player: PlayerState): void {
+        if (player.id === myPlayer().id) return;
+        if (this.playerAnchors[player.id]) return;
+
+        const usedPositions = new Set(Object.values(this.playerAnchors).map((anchor) => anchor.position));
+        const positions: Array<'left' | 'top' | 'right'> = ['left', 'top', 'right'];
+        const nextPosition = positions.find((position) => !usedPositions.has(position));
+
+        if (!nextPosition) return;
+
+        const anchor = createSidePlayerUI(this, player, nextPosition, this.isBotProfile(player));
+        this.playerAnchors[player.id] = anchor;
+    }
+
+    private isBotProfile(player: PlayerState): boolean {
+        const maybe = player as PlayerState & { isBot?: () => boolean };
+        if (typeof maybe.isBot === 'function') {
+            return maybe.isBot();
+        }
+
+        const profile = player.getProfile() as { name?: string; isBot?: boolean };
+        return Boolean(profile.isBot) || /bot/i.test(profile.name ?? '');
+    }
+
+    private hasPendingAction(): boolean {
+        const pending = myPlayer().getState('pendingAction') as PendingAction | null | undefined;
+        return Boolean(pending);
+    }
+
+    private queuePendingAction(action: PendingActionInput): void {
+        this.localActionSeq += 1;
+        myPlayer().setState('pendingAction', { ...action, seq: this.localActionSeq });
+    }
+
+    private processPendingActions(): void {
+        if (!isHost()) return;
+
+        Object.values(getParticipants()).forEach((player) => {
+            const pending = player.getState('pendingAction') as PendingAction | null | undefined;
+            if (!pending) return;
+
+            const lastSeq = this.lastProcessedActionSeq.get(player.id) ?? 0;
+            if (pending.seq <= lastSeq) {
+                player.setState('pendingAction', null);
+                return;
+            }
+
+            if (pending.type === 'bid') {
+                this.submitBidForPlayer(player, pending.bid);
+            }
+
+            if (pending.type === 'playCard') {
+                this.playCardForPlayer(player, pending.card);
+            }
+
+            this.lastProcessedActionSeq.set(player.id, pending.seq);
+            player.setState('pendingAction', null);
+        });
+    }
+
+    private syncLocalHandFromState(): void {
+        const handState = myPlayer().getState('hand') as SerializedCard[] | undefined;
+        const signature = handState ? JSON.stringify(handState) : '';
+        if (!handState || signature === this.lastHandSignature) return;
+
+        this.lastHandSignature = signature;
+        this.myHand = deserializeCards(handState);
+        this.handSprites = renderPlayerHand(this, this.myHand, this.handSprites);
+        this.attachHandInteractions(this.handSprites);
+        this.updatePlayableCards();
+    }
+
+    private syncTrickWinState(): void {
+        const trickWinVersion = (getState('trickWinVersion') as number | undefined) ?? 0;
+        if (trickWinVersion !== this.lastTrickWinVersion) {
+            this.lastTrickWinVersion = trickWinVersion;
+            const winnerId = getState('trickWinnerId') as string | undefined;
+            if (winnerId) {
+                this.isAnimatingTrickWin = true;
+                this.safeDelayedCall(1000, () => this.animateTrickWinner(winnerId));
+            }
+        }
+
+        const trickCards = (getState('trickCards') as Array<{ playerId: string; card: SerializedCard }>) ?? [];
+        if (this.isAnimatingTrickWin && trickCards.length === 0) {
+            this.isAnimatingTrickWin = false;
+        }
     }
 
     private getTurnOrder(playerIds: string[], hostId: string): string[] {

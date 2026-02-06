@@ -180,7 +180,7 @@ function isBotPlayer(player: PlayerState): boolean {
     return Boolean(profile.isBot) || /bot/i.test(profile.name ?? '');
 }
 
-function createSidePlayerUI(scene: Phaser.Scene, player: PlayerState, position: 'left' | 'top' | 'right', isBot: boolean): PlayerAnchor {
+export function createSidePlayerUI(scene: Phaser.Scene, player: PlayerState, position: 'left' | 'top' | 'right', isBot: boolean): PlayerAnchor {
     const profileImageRadius = 32;
     const avatarSize = profileImageRadius * 2;
     const margin = 28;
