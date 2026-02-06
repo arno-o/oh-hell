@@ -31,10 +31,11 @@ export class Preloader extends Scene
         this.load.audio(ASSET_KEYS.AUDIO_CARD_2, 'audio/card2.ogg');
         this.load.audio(ASSET_KEYS.AUDIO_CARD_SPREAD, 'audio/cardSpread.ogg');
         this.load.audio(ASSET_KEYS.AUDIO_ROUND_WIN, 'audio/roundWin.ogg');
-        // this.load.audio(ASSET_KEYS.AUDIO_TRICK_WIN, 'audio/trickWin.ogg');
         this.load.audio(ASSET_KEYS.AUDIO_TRUMP_MOVE, 'audio/trumpMove.wav');
         this.load.audio(ASSET_KEYS.AUDIO_UI_CLICK, 'audio/ui_click.wav');
         this.load.audio(ASSET_KEYS.AUDIO_CHAT_POST, 'audio/chatPost.wav');
+
+        this.sound.pauseOnBlur = false;
     }
 
     create ()
