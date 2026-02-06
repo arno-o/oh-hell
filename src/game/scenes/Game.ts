@@ -1,5 +1,5 @@
 import { Scene } from 'phaser';
-import { animateTrumpSelection, ChatWindow, createBidBubble, createBidModal, createChatWindow, createDrawPile, createMenuButtons, createOtherPlayersUI, createPlayerUI, moveDrawPileToTopLeft, PlayerAnchor, renderPlayerHand, renderTrickCards, renderTrumpCardNextToDeck } from '@/lib/ui';
+import { animateTrumpSelection, ChatWindow, createBidBubble, createBidModal, createChatWindow, createDrawPile, createMenuButtons, createOtherPlayersUI, createPlayerUI, createRoundSummaryPanel, moveDrawPileToTopLeft, PlayerAnchor, renderPlayerHand, renderTrickCards, renderTrumpCardNextToDeck, RoundSummaryData } from '@/lib/ui';
 import { ASSET_KEYS, CARD_SCALE } from '@/lib/common';
 import { Card, createDeck, shuffleDeck } from '@/lib/deck';
 import { getParticipants, getState, isHost, myPlayer, onPlayerJoin, PlayerState, setState } from 'playroomkit';
@@ -31,6 +31,7 @@ export class Game extends Scene
     private playerAnchors: Record<string, PlayerAnchor> = {};
     private bidModal?: Phaser.GameObjects.Container;
     private bidBubbles: Record<string, Phaser.GameObjects.Container> = {};
+    private roundSummaryContainer?: Phaser.GameObjects.Container;
     private deckAnchor = { x: 0, y: 0 };
     private pileX = 0;
     private pileY = 0;
@@ -49,6 +50,11 @@ export class Game extends Scene
     private lastTurnPlayerId?: string;
     private lastTrickVersion = 0;
     private lastBids: Record<string, number | null> = {};
+    private lastBidsVersion = 0;
+    private lastBiddingPhase = false;
+    private lastBidPlayerId?: string;
+    private lastBidTrickVersion = 0;
+    private lastRoundSummaryVersion = 0;
     private botNextActionAt: Map<string, number> = new Map();
     private botBaseDelayMs = 500;
     private botRandomDelayMs = 400;
@@ -58,6 +64,8 @@ export class Game extends Scene
     private isAnimatingTrickWin = false;
     private isHandDisabledForBid = false;
     private isHandDisabledForDelay = false;
+    private pollTimer?: Phaser.Time.TimerEvent;
+    private uiPollMs = 100;
 
     constructor() { super('Game'); }
 
@@ -69,6 +77,10 @@ export class Game extends Scene
             if (!existing) {
                 this.players.push(player);
             }
+
+            if (isHost() && player.getState('score') == null) {
+                player.setState('score', 0);
+            }
         });
     }
 
@@ -79,6 +91,18 @@ export class Game extends Scene
         this.cameras.main.setBackgroundColor('#074924');
         this.deck = shuffleDeck(createDeck());
         this.runGameSetup(this);
+
+        this.pollTimer = this.time.addEvent({
+            delay: this.uiPollMs,
+            loop: true,
+            callback: () => {
+                if (!this.scene.isActive()) return;
+                this.updateBiddingUI();
+                this.updateRoundSummaryUI();
+                this.updateChatFromState();
+                this.updateBots();
+            }
+        });
     }
 
     shutdown() {
@@ -88,6 +112,10 @@ export class Game extends Scene
         this.botNextActionAt.clear();
         this.players = [];
         this.closeChatWindow();
+        if (this.pollTimer) {
+            this.pollTimer.remove(false);
+            this.pollTimer = undefined;
+        }
         this.events.off(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this);
     }
 
@@ -97,6 +125,11 @@ export class Game extends Scene
 
         if (isHost()) {
             setState('hostId', localPlayer.id);
+            this.players.forEach((player) => {
+                if (player.getState('score') == null) {
+                    player.setState('score', 0);
+                }
+            });
         }
 
         const { drawButton, pileX, pileY, drawPileCards } = createDrawPile(scene, async () => {
@@ -124,6 +157,8 @@ export class Game extends Scene
                 player.setState('bid', null);
                 console.log('[Deal] Set player hand', { playerId: player.id, count: hand.length });
             });
+
+            setState('bidsVersion', (getState('bidsVersion') ?? 0) + 1);
 
             setState('round', this.logic.getRound());
             setState('cardsPerPlayer', cardsPerPlayer);
@@ -231,9 +266,6 @@ export class Game extends Scene
             this.updatePlayableCards();
         }
 
-        this.updateBiddingUI();
-        this.updateChatFromState();
-        this.updateBots();
     }
 
     private toggleChatWindow(): void {
@@ -531,10 +563,10 @@ export class Game extends Scene
             setState('currentTurnPlayerId', winnerId);
 
             // check if round is over (everyone out of cards)
-            if (this.myHand.length === 0) {
-                console.log('[Round] Round complete, starting new round');
-                this.time.delayedCall(2000, () => {
-                    this.startNewRound();
+            if (this.isRoundComplete()) {
+                console.log('[Round] Round complete, showing summary');
+                this.time.delayedCall(1600, () => {
+                    this.showRoundSummary();
                 });
             }
         });
@@ -577,6 +609,20 @@ export class Game extends Scene
         const biddingPhase = Boolean(getState('biddingPhase'));
         const localId = myPlayer().id;
         const currentBidPlayerId = getState('currentBidPlayerId') as string | undefined;
+        const bidsVersion = (getState('bidsVersion') as number | undefined) ?? 0;
+        const trickVersion = (getState('trickVersion') as number | undefined) ?? 0;
+        const trickCards = (getState('trickCards') as Array<{ playerId: string; card: SerializedCard }>) ?? [];
+        const hasTrickStarted = trickCards.length > 0;
+
+        const shouldUpdate =
+            biddingPhase !== this.lastBiddingPhase ||
+            currentBidPlayerId !== this.lastBidPlayerId ||
+            bidsVersion !== this.lastBidsVersion ||
+            trickVersion !== this.lastBidTrickVersion;
+
+        if (!shouldUpdate) {
+            return;
+        }
 
         if (biddingPhase && currentBidPlayerId === localId && myPlayer().getState('bid') == null) {
             if (!this.bidModal) {
@@ -593,15 +639,121 @@ export class Game extends Scene
 
         Object.values(getParticipants()).forEach((player) => {
             const bid = player.getState('bid') as number | null;
-            if (this.lastBids[player.id] !== bid && bid != null) {
-                const anchor = this.playerAnchors[player.id];
-                if (anchor) {
-                    this.sound.play(ASSET_KEYS.AUDIO_BUTTON_2, {volume: 0.3});
-                    this.bidBubbles[player.id] = createBidBubble(this, anchor, bid, this.bidBubbles[player.id]);
-                }
+            const previous = this.lastBids[player.id];
+            const anchor = this.playerAnchors[player.id];
+            const tricks = (getState(`tricks_${player.id}`) as number | undefined) ?? 0;
+
+            if (anchor?.bidText) {
+                anchor.bidText.setText(bid == null ? '--' : `${tricks}/${bid}`);
             }
+
+            if (bid == null && previous != null) {
+                this.bidBubbles[player.id]?.destroy();
+                this.bidBubbles[player.id] = undefined as unknown as Phaser.GameObjects.Container;
+            }
+
+            if (hasTrickStarted && this.bidBubbles[player.id]) {
+                this.bidBubbles[player.id].destroy();
+                this.bidBubbles[player.id] = undefined as unknown as Phaser.GameObjects.Container;
+            }
+
+            if (!hasTrickStarted && this.lastBids[player.id] !== bid && bid != null && anchor) {
+                this.sound.play(ASSET_KEYS.AUDIO_BUTTON_2, {volume: 0.3});
+                this.bidBubbles[player.id] = createBidBubble(this, anchor, bid, this.bidBubbles[player.id]);
+            }
+
             this.lastBids[player.id] = bid ?? null;
         });
+
+        this.lastBidsVersion = bidsVersion;
+        this.lastBiddingPhase = biddingPhase;
+        this.lastBidPlayerId = currentBidPlayerId;
+        this.lastBidTrickVersion = trickVersion;
+    }
+
+    private isRoundComplete(): boolean {
+        return Object.values(getParticipants()).every((player) => {
+            const count = (player.getState('handCount') as number | undefined) ?? 0;
+            return count === 0;
+        });
+    }
+
+    private showRoundSummary(): void {
+        if (!isHost()) return;
+        if (getState('roundSummaryOpen')) return;
+
+        const round = (getState('round') as number | undefined) ?? 1;
+        const results = Object.values(getParticipants()).map((player) => {
+            const bid = (player.getState('bid') as number | null) ?? 0;
+            const tricks = (getState(`tricks_${player.id}`) as number | undefined) ?? 0;
+            const points = tricks + (tricks === bid ? 10 : 0);
+            const previousTotal = (player.getState('score') as number | undefined) ?? 0;
+            const total = previousTotal + points;
+            player.setState('score', total);
+
+            const profile = player.getProfile();
+            const rawColor = profile.color?.hex;
+            const color = typeof rawColor === 'number'
+                ? `#${rawColor.toString(16).padStart(6, '0')}`
+                : rawColor;
+            return {
+                playerId: player.id,
+                playerName: profile.name,
+                color,
+                bid,
+                tricks,
+                points,
+                total
+            };
+        });
+
+        results.sort((a, b) => {
+            if (b.points !== a.points) return b.points - a.points;
+            return b.total - a.total;
+        });
+
+        setState('roundSummary', { round, results });
+        setState('roundSummaryOpen', true);
+        setState('roundSummaryVersion', (getState('roundSummaryVersion') ?? 0) + 1);
+    }
+
+    private updateRoundSummaryUI(): void {
+        const isOpen = Boolean(getState('roundSummaryOpen'));
+        const summaryVersion = (getState('roundSummaryVersion') as number | undefined) ?? 0;
+
+        if (!isOpen) {
+            if (this.roundSummaryContainer) {
+                this.roundSummaryContainer.destroy(true);
+                this.roundSummaryContainer = undefined;
+            }
+            return;
+        }
+
+        if (summaryVersion === this.lastRoundSummaryVersion && this.roundSummaryContainer) {
+            return;
+        }
+
+        this.lastRoundSummaryVersion = summaryVersion;
+
+        if (this.roundSummaryContainer) {
+            this.roundSummaryContainer.destroy(true);
+            this.roundSummaryContainer = undefined;
+        }
+
+        const summary = getState('roundSummary') as RoundSummaryData | undefined;
+
+        if (!summary) return;
+
+        const panel = createRoundSummaryPanel(this, summary, isHost(), () => this.continueFromRoundSummary());
+        this.roundSummaryContainer = panel.container;
+    }
+
+    private continueFromRoundSummary(): void {
+        if (!isHost()) return;
+        setState('roundSummaryOpen', false);
+        setState('roundSummary', null);
+        setState('roundSummaryVersion', (getState('roundSummaryVersion') ?? 0) + 1);
+        this.startNewRound();
     }
 
     private setHandDisabledForBid(disabled: boolean): void {
@@ -665,6 +817,7 @@ export class Game extends Scene
 
     private submitBid(bid: number): void {
         myPlayer().setState('bid', bid);
+        setState('bidsVersion', (getState('bidsVersion') ?? 0) + 1);
 
         const order = (getState('biddingOrder') as string[]) ?? [];
         const currentIndex = getState('biddingIndex') ?? 0;
@@ -758,6 +911,7 @@ export class Game extends Scene
 
     private submitBidForPlayer(player: PlayerState, bid: number): void {
         player.setState('bid', bid);
+        setState('bidsVersion', (getState('bidsVersion') ?? 0) + 1);
 
         const order = (getState('biddingOrder') as string[]) ?? [];
         const currentIndex = getState('biddingIndex') ?? 0;
@@ -867,6 +1021,8 @@ export class Game extends Scene
             player.setState('bid', null);
             setState(`tricks_${player.id}`, 0);
         });
+
+        setState('bidsVersion', (getState('bidsVersion') ?? 0) + 1);
 
         // update global state
         setState('round', round);

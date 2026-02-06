@@ -14,7 +14,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     score: 0
                 }
             },
-            skipLobby: true // for developing only
+            // skipLobby: true // for developing only
         });
 
         await fillBotsToFourPlayers();

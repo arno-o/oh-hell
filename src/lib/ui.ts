@@ -12,6 +12,7 @@ export type PlayerAnchor = {
     y: number;
     position: PlayerAnchorPosition;
     turnHighlight?: Phaser.GameObjects.Graphics;
+    bidText?: Phaser.GameObjects.Text;
 };
 
 /**
@@ -272,14 +273,6 @@ function createSidePlayerUI(scene: Phaser.Scene, player: PlayerState, position: 
     });
     bidLabel.setOrigin(0, 0.5);
 
-    const bidValue = '--';
-    const bidText = scene.add.text(0, bidLabelY, bidValue, {
-        fontSize: '14px',
-        color: '#ffffff',
-        fontStyle: 'bold'
-    });
-    bidText.setOrigin(0.5, 0.5);
-
     const bidBgWidth = 40;
     const bidBgHeight = 20;
     const bidBgX = bidLabelX + 28;
@@ -287,6 +280,14 @@ function createSidePlayerUI(scene: Phaser.Scene, player: PlayerState, position: 
     const bidBg = scene.add.graphics();
     bidBg.fillStyle(0x2a2f3a, 1);
     bidBg.fillRoundedRect(bidBgX, bidBgY, bidBgWidth, bidBgHeight, 8);
+
+    const bidValue = '--';
+    const bidText = scene.add.text(0, bidLabelY, bidValue, {
+        fontSize: '14px',
+        color: '#ffffff',
+        fontStyle: 'bold'
+    });
+    bidText.setOrigin(0.5, 0.5);
 
     bidText.setX(bidBgX + bidBgWidth / 2);
 
@@ -300,7 +301,8 @@ function createSidePlayerUI(scene: Phaser.Scene, player: PlayerState, position: 
             x: panelX + panelWidth + 16,
             y: panelY + panelHeight / 2,
             position: 'left',
-            turnHighlight
+            turnHighlight,
+            bidText
         };
     }
 
@@ -309,7 +311,8 @@ function createSidePlayerUI(scene: Phaser.Scene, player: PlayerState, position: 
             x: panelX - 16,
             y: panelY + panelHeight / 2,
             position: 'right',
-            turnHighlight
+            turnHighlight,
+            bidText
         };
     }
 
@@ -317,7 +320,8 @@ function createSidePlayerUI(scene: Phaser.Scene, player: PlayerState, position: 
         x: panelX + panelWidth / 2,
         y: panelY + panelHeight + 16,
         position: 'top',
-        turnHighlight
+        turnHighlight,
+        bidText
     };
 }
 
@@ -420,6 +424,26 @@ export type ChatWindow = {
     drawInputBg: (focused: boolean) => void;
     inputHitArea: Phaser.GameObjects.Rectangle;
     closeButton: Phaser.GameObjects.Text;
+};
+
+export type RoundSummaryResult = {
+    playerId: string;
+    playerName: string;
+    color?: string;
+    bid: number;
+    tricks: number;
+    points: number;
+    total: number;
+};
+
+export type RoundSummaryData = {
+    round: number;
+    results: RoundSummaryResult[];
+};
+
+export type RoundSummaryPanel = {
+    container: Phaser.GameObjects.Container;
+    textNodes: Phaser.GameObjects.Text[];
 };
 
 export function createChatWindow(
@@ -982,4 +1006,84 @@ export function renderTrickCards(
         });
         return sprite;
     });
+}
+
+export function createRoundSummaryPanel(
+    scene: Phaser.Scene,
+    summary: RoundSummaryData,
+    isHost: boolean,
+    onContinue: () => void
+): RoundSummaryPanel {
+    const panelWidth = 380;
+    const padding = 14;
+    const headerHeight = 26;
+    const rowHeight = 22;
+    const footerHeight = 54;
+    const height = padding * 2 + headerHeight + rowHeight * (summary.results.length + 1) + footerHeight;
+    const x = scene.scale.width - panelWidth - 20;
+    const y = scene.scale.height - height - 20;
+
+    const container = scene.add.container(x, y);
+    const textNodes: Phaser.GameObjects.Text[] = [];
+
+    const bg = scene.add.graphics();
+    bg.fillStyle(0x1c1f26, 0.95);
+    bg.lineStyle(2, 0xffffff, 0.15);
+    bg.fillRoundedRect(0, 0, panelWidth, height, 12);
+    bg.strokeRoundedRect(0, 0, panelWidth, height, 12);
+    container.add(bg);
+
+    const title = scene.add.text(padding, padding, `Round ${summary.round} Results`, {
+        fontSize: '16px',
+        color: '#ffffff',
+        fontStyle: 'bold'
+    });
+    container.add(title);
+
+    let currentY = padding + headerHeight;
+    const header = scene.add.text(padding, currentY, 'Player', {
+        fontSize: '12px',
+        color: '#9aa0a6',
+        fontStyle: 'bold'
+    });
+    const headerBid = scene.add.text(190, currentY, 'Bid', { fontSize: '12px', color: '#9aa0a6', fontStyle: 'bold' });
+    const headerTricks = scene.add.text(230, currentY, 'Tricks', { fontSize: '12px', color: '#9aa0a6', fontStyle: 'bold' });
+    const headerPoints = scene.add.text(290, currentY, 'Pts', { fontSize: '12px', color: '#9aa0a6', fontStyle: 'bold' });
+    const headerTotal = scene.add.text(330, currentY, 'Total', { fontSize: '12px', color: '#9aa0a6', fontStyle: 'bold' });
+    container.add(header);
+    container.add(headerBid);
+    container.add(headerTricks);
+    container.add(headerPoints);
+    container.add(headerTotal);
+
+    currentY += rowHeight;
+    summary.results.forEach((result) => {
+        const name = scene.add.text(padding, currentY, result.playerName, {
+            fontSize: '13px',
+            color: result.color ?? '#ffffff'
+        });
+        const bidText = scene.add.text(200, currentY, `${result.bid}`, { fontSize: '13px', color: '#ffffff' });
+        const tricksText = scene.add.text(240, currentY, `${result.tricks}`, { fontSize: '13px', color: '#ffffff' });
+        const pointsText = scene.add.text(292, currentY, `${result.points}`, { fontSize: '13px', color: '#f7d560' });
+        const totalText = scene.add.text(334, currentY, `${result.total}`, { fontSize: '13px', color: '#ffffff' });
+
+        container.add(name);
+        container.add(bidText);
+        container.add(tricksText);
+        container.add(pointsText);
+        container.add(totalText);
+
+        textNodes.push(name, bidText, tricksText, pointsText, totalText);
+        currentY += rowHeight;
+    });
+
+    const buttonLabel = isHost ? 'Continue' : 'Waiting for host…';
+    const button = createButton(scene, panelWidth / 2, height - padding - 10, buttonLabel, () => {
+        if (!isHost) return;
+        onContinue();
+    });
+    button.setFontSize(18);
+    container.add(button);
+
+    return { container, textNodes };
 }
