@@ -1,8 +1,8 @@
 import { Scene } from 'phaser';
-import { animateTrumpSelection, ChatWindow, createBidBubble, createBidModal, createChatWindow, createDrawPile, createMenuButtons, createOtherPlayersUI, createPlayerUI, createRoundSummaryPanel, createSidePlayerUI, moveDrawPileToTopLeft, PlayerAnchor, renderPlayerHand, renderTrickCards, renderTrumpCardNextToDeck, RoundSummaryData } from '@/lib/ui';
+import { AlertToast, animateTrumpSelection, ChatWindow, createAlertToast, createBidBubble, createBidModal, createChatWindow, createDrawPile, createMenuButtons, createOtherPlayersUI, createPlayerUI, createRoundSummaryPanel, createSidePlayerUI, moveDrawPileToTopLeft, PlayerAnchor, renderPlayerHand, renderTrickCards, renderTrumpCardNextToDeck, RoundSummaryData } from '@/lib/ui';
 import { ASSET_KEYS, CARD_SCALE } from '@/lib/common';
 import { Card, createDeck, shuffleDeck } from '@/lib/deck';
-import { getParticipants, getState, isHost, myPlayer, onPlayerJoin, PlayerState, setState } from 'playroomkit';
+import { addBot, getParticipants, getState, isHost, myPlayer, onPlayerJoin, PlayerState, setState } from 'playroomkit';
 import { deserializeCards, GameLogic, serializeCards, SerializedCard } from '@/lib/gameLogic';
 import { CardSprite } from '@/lib/cardSprite';
 import { PlayerBot } from '@/player/Bot';
@@ -78,6 +78,19 @@ export class Game extends Scene
     private localActionSeq = 0;
     private lastProcessedActionSeq: Map<string, number> = new Map();
     private lastHandSignature = '';
+    private alertQueue: string[] = [];
+    private activeAlerts: AlertToast[] = [];
+    private alertBaseY = 100;
+    private alertGap = 12;
+    private lastParticipantIds: Set<string> = new Set();
+    private participantNames: Map<string, string> = new Map();
+    private lastHostId?: string;
+    private hostInitialized = false;
+    private lastRound?: number;
+    private lastRoundSummaryOpen = false;
+    private lastGameOver = false;
+    private isFillingBots = false;
+    private maxPlayers = 4;
 
     constructor() { super('Game'); }
 
@@ -107,6 +120,10 @@ export class Game extends Scene
         this.cameras.main.setBackgroundColor('#074924');
         this.deck = shuffleDeck(createDeck());
         this.runGameSetup(this);
+    this.captureParticipantSnapshot();
+    this.lastHostId = getState('hostId') as string | undefined;
+    this.hostInitialized = Boolean(this.lastHostId);
+    this.lastRound = getState('round') as number | undefined;
 
         this.pollTimer = this.time.addEvent({
             delay: this.uiPollMs,
@@ -118,6 +135,10 @@ export class Game extends Scene
                 this.updateChatFromState();
                 this.processPendingActions();
                 this.updateBots();
+                this.checkParticipantChanges();
+                this.checkHostChanges();
+                this.checkRoundAlerts();
+                this.checkGameOverAlert();
             }
         });
     }
@@ -125,6 +146,9 @@ export class Game extends Scene
     shutdown() {
         this.handSprites = [];
         this.trickSprites = [];
+        this.alertQueue = [];
+        this.activeAlerts.forEach((toast) => toast.container.destroy());
+        this.activeAlerts = [];
         this.botPendingAction.clear();
         this.botNextActionAt.clear();
         this.players = [];
@@ -1117,6 +1141,161 @@ export class Game extends Scene
         if (this.isAnimatingTrickWin && trickCards.length === 0) {
             this.isAnimatingTrickWin = false;
         }
+    }
+
+    private enqueueAlert(message: string): void {
+        this.alertQueue.push(message);
+        this.flushAlertQueue();
+    }
+
+    private flushAlertQueue(): void {
+        if (!this.alertQueue.length) return;
+
+        while (this.alertQueue.length) {
+            const message = this.alertQueue.shift();
+            if (!message) return;
+            const toast = createAlertToast(this, message, { width: 420 });
+            this.activeAlerts.push(toast);
+            this.positionAlerts();
+
+            toast.container.setAlpha(0);
+            this.tweens.add({
+                targets: toast.container,
+                alpha: 1,
+                duration: 160,
+                ease: 'Sine.easeOut'
+            });
+
+            this.time.delayedCall(2400, () => {
+                this.tweens.add({
+                    targets: toast.container,
+                    alpha: 0,
+                    duration: 220,
+                    ease: 'Sine.easeIn',
+                    onComplete: () => {
+                        toast.container.destroy();
+                        this.activeAlerts = this.activeAlerts.filter((item) => item !== toast);
+                        this.positionAlerts();
+                    }
+                });
+            });
+        }
+    }
+
+    private positionAlerts(): void {
+        let y = this.alertBaseY;
+        this.activeAlerts.forEach((toast) => {
+            toast.container.setPosition(this.scale.width / 2, y);
+            y += toast.height + this.alertGap;
+        });
+    }
+
+    private captureParticipantSnapshot(): void {
+        const participants = Object.values(getParticipants());
+        this.lastParticipantIds = new Set(participants.map((player) => player.id));
+        participants.forEach((player) => {
+            this.participantNames.set(player.id, player.getProfile().name);
+        });
+    }
+
+    private checkParticipantChanges(): void {
+        const participants = Object.values(getParticipants());
+        const currentIds = new Set(participants.map((player) => player.id));
+
+        let playerLeft = false;
+
+        participants.forEach((player) => {
+            if (!this.lastParticipantIds.has(player.id)) {
+                this.enqueueAlert(`${player.getProfile().name} joined`);
+            }
+        });
+
+        this.lastParticipantIds.forEach((id) => {
+            if (!currentIds.has(id)) {
+                const name = this.participantNames.get(id) ?? 'A player';
+                this.enqueueAlert(`${name} left`);
+                playerLeft = true;
+                delete this.playerAnchors[id];
+            }
+        });
+
+        this.participantNames.clear();
+        participants.forEach((player) => {
+            this.participantNames.set(player.id, player.getProfile().name);
+        });
+        this.lastParticipantIds = currentIds;
+        this.players = participants;
+
+        if (playerLeft) {
+            this.fillMissingBots();
+        }
+    }
+
+    private fillMissingBots(): void {
+        if (!isHost()) return;
+        if (this.isFillingBots) return;
+
+        const count = Object.keys(getParticipants()).length;
+        const missing = Math.max(0, this.maxPlayers - count);
+
+        if (missing === 0) return;
+
+        this.isFillingBots = true;
+
+        const addMissing = async () => {
+            for (let i = 0; i < missing; i += 1) {
+                await addBot();
+            }
+            this.isFillingBots = false;
+        };
+
+        addMissing();
+    }
+
+    private checkHostChanges(): void {
+        const hostId = getState('hostId') as string | undefined;
+
+        if (!hostId && isHost()) {
+            setState('hostId', myPlayer().id);
+            return;
+        }
+
+        if (!this.hostInitialized) {
+            this.lastHostId = hostId;
+            this.hostInitialized = Boolean(hostId);
+            return;
+        }
+
+        if (hostId && this.lastHostId && hostId !== this.lastHostId) {
+            const name = this.participantNames.get(hostId) ?? 'Unknown';
+            this.enqueueAlert(`Host left. New host is ${name}`);
+        }
+
+        this.lastHostId = hostId;
+    }
+
+    private checkRoundAlerts(): void {
+        const round = getState('round') as number | undefined;
+        const summaryOpen = Boolean(getState('roundSummaryOpen'));
+
+        if (summaryOpen && !this.lastRoundSummaryOpen && round) {
+            this.enqueueAlert(`Round ${round} over`);
+        }
+
+        if (typeof round === 'number' && this.lastRound != null && round !== this.lastRound) {
+            this.enqueueAlert(`Round ${round} begins`);
+        }
+
+        this.lastRoundSummaryOpen = summaryOpen;
+        this.lastRound = round;
+    }
+
+    private checkGameOverAlert(): void {
+        const gameOver = Boolean(getState('gameOver'));
+        if (gameOver && !this.lastGameOver) {
+            this.enqueueAlert('Game over');
+        }
+        this.lastGameOver = gameOver;
     }
 
     private getTurnOrder(playerIds: string[], hostId: string): string[] {
