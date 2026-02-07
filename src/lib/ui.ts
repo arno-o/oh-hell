@@ -446,6 +446,11 @@ export type RoundSummaryPanel = {
     textNodes: Phaser.GameObjects.Text[];
 };
 
+export type AlertToast = {
+    container: Phaser.GameObjects.Container;
+    height: number;
+};
+
 export function createChatWindow(
     scene: Phaser.Scene,
     options: { onClose: () => void; title?: string; width?: number; height?: number } 
@@ -551,6 +556,41 @@ export function createChatWindow(
         inputHitArea,
         closeButton
     };
+}
+
+export function createAlertToast(
+    scene: Phaser.Scene,
+    message: string,
+    options: { width?: number; bgColor?: number; textColor?: string } = {}
+): AlertToast {
+    const width = options.width ?? 360;
+    const paddingX = 16;
+    const paddingY = 12;
+    const textColor = options.textColor ?? '#f9fafb';
+    const bgColor = options.bgColor ?? 0x111827;
+
+    const container = scene.add.container(0, 0);
+    container.setDepth(1000);
+
+    const text = scene.add.text(0, 0, message, {
+        fontSize: '14px',
+        color: textColor,
+        align: 'center',
+        wordWrap: { width: width - paddingX * 2 }
+    });
+    text.setOrigin(0.5, 0.5);
+
+    const height = text.height + paddingY * 2;
+    const background = scene.add.graphics();
+    background.fillStyle(bgColor, 0.92);
+    background.fillRoundedRect(-width / 2, -height / 2, width, height, 12);
+    background.lineStyle(2, 0x334155, 0.9);
+    background.strokeRoundedRect(-width / 2, -height / 2, width, height, 12);
+
+    container.add(background);
+    container.add(text);
+
+    return { container, height };
 }
 
 export function createBidBubble(
