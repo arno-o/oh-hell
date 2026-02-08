@@ -2,6 +2,7 @@ import { Scene } from 'phaser';
 import { Card } from '@/lib/card';
 import { ASSET_KEYS } from './common';
 import { getCardName } from '@/lib/deck';
+import { getUILayout } from '@/lib/layout';
 
 export const HOVER_LIFT = 20;
 export const HOVER_SCALE = 1;
@@ -91,9 +92,12 @@ export class CardSprite extends Phaser.GameObjects.Sprite {
             if (!this.scene.sound.locked) {
                 this.hoverSound.play();
             }
+            const layout = getUILayout(this.scene);
+            // On mobile, lift cards much higher so the selected card is clearly visible
+            const lift = layout.isMobile ? HOVER_LIFT * 4 : HOVER_LIFT * 1.5;
             this.scene.tweens.add({
                 targets: this,
-                y: this.originalY - HOVER_LIFT * 1.5,
+                y: this.originalY - lift,
                 angle: 0,
                 scaleX: this.baseScale * HOVER_SCALE,
                 scaleY: this.baseScale * HOVER_SCALE,
@@ -145,7 +149,10 @@ export class CardSprite extends Phaser.GameObjects.Sprite {
         this.scene.tweens.killTweensOf(this);
         
         // drop it on the pile to play the card
-        const droppedInPlayZone = this.y < this.scene.cameras.main.height * 0.7;
+        const layout = getUILayout(this.scene);
+        // On mobile with cards sitting lower, use a more generous drop zone (60%)
+        const dropThreshold = layout.isMobile ? 0.55 : 0.7;
+        const droppedInPlayZone = this.y < this.scene.cameras.main.height * dropThreshold;
         
         if (droppedInPlayZone) {
             this.emit('card-drop', this);

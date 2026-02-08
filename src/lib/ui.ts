@@ -1,4 +1,5 @@
-import { ASSET_KEYS, CARD_BACK_FRAME, CARD_HEIGHT, CARD_SCALE, CARD_WIDTH, CARD_SUIT_COLOR, CARD_SUIT_TO_COLOR, MenuItemId } from '@/lib/common';
+import { ASSET_KEYS, CARD_BACK_FRAME, CARD_HEIGHT, CARD_WIDTH, CARD_SUIT_COLOR, CARD_SUIT_TO_COLOR, MenuItemId } from '@/lib/common';
+import { getCardScale, getTrickCardScale, getUILayout } from '@/lib/layout';
 import { PlayerState } from 'playroomkit';
 import { MENU_ITEMS } from '@/lib/common';
 import { Card } from '@/lib/card';
@@ -34,14 +35,20 @@ export function createDrawPile(scene: Phaser.Scene, onDraw?: () => void): {
     pileY: number;
 } {
     const drawPileCards: Phaser.GameObjects.Image[] = [];
-    const centerX = scene.scale.width / 2;
-    const centerY = scene.scale.height / 2;
+    const layout = getUILayout(scene);
+    const centerX = layout.centerX;
+    // On mobile, center the draw pile in the play area — same zone as trick cards
+    const centerY = layout.isMobile ? layout.pctH(45) : layout.centerY;
+    const cardOffset = layout.isMobile ? 6 : 10;
+    const buttonOffset = layout.isMobile ? 80 : 100;
+    // Use trick card scale for the draw pile on mobile so it doesn't dominate center
+    const cardScale = layout.isMobile ? getTrickCardScale(scene) : getCardScale(scene);
 
     for (let i = 0; i < 3; i += 1) {
-        drawPileCards.push(createCard(scene, centerX + i * 10, centerY));
+        drawPileCards.push(createCard(scene, centerX + i * cardOffset, centerY, cardScale));
     }
 
-    const drawButton = createButton(scene, centerX, centerY + 100, "Draw cards", () => onDraw?.());
+    const drawButton = createButton(scene, centerX, centerY + buttonOffset, "Draw cards", () => onDraw?.());
 
     return { drawPileCards, drawButton, pileX: centerX, pileY: centerY };
 }
@@ -59,12 +66,38 @@ export function renderPlayerHand(
         return [];
     }
 
-    const centerX = scene.scale.width / 2;
-    const handY = scene.scale.height - 140;
-    const spacing = Math.min(CARD_WIDTH * CARD_SCALE * 1, 60);
+    const layout = getUILayout(scene);
+    const centerX = layout.centerX;
+    const cardScale = getCardScale(scene);
+    const cardWidth = CARD_WIDTH * cardScale;
+    const cardHeight = CARD_HEIGHT * cardScale;
+
+    let handY: number;
+    let spacing: number;
+    let fanAngle: number;
+
+    if (layout.isMobile) {
+        // Mobile: large cards in a horizontal strip.
+        // Bottom portion gets clipped by the slim player bar — intentional,
+        // since rank/suit are shown in the top-left corner of each card.
+        const bottomBarHeight = layout.pctH(6);
+        handY = layout.height - bottomBarHeight - cardHeight * 0.42;
+
+        const availableWidth = layout.width - layout.pctW(4);
+        // Show ~55% of each card so rank/suit are always visible
+        const idealSpacing = cardWidth * 0.55;
+        const maxFitSpacing = (availableWidth - cardWidth) / Math.max(1, cards.length - 1);
+        spacing = Math.min(idealSpacing, maxFitSpacing);
+        fanAngle = 0; // No fan on mobile — straight horizontal strip
+    } else {
+        handY = layout.height - 140;
+        const maxSpacing = 60;
+        spacing = Math.min(cardWidth, maxSpacing);
+        fanAngle = 12;
+    }
+
     const totalWidth = spacing * (cards.length - 1);
     const startX = centerX - totalWidth / 2;
-    const fanAngle = 12;
     const angleStep = cards.length > 1 ? fanAngle / (cards.length - 1) : 0;
 
     const from = options?.from;
@@ -76,8 +109,8 @@ export function renderPlayerHand(
         const x = startX + spacing * index;
         const startXPos = from?.x ?? x;
         const startYPos = from?.y ?? handY;
-        const angle = -fanAngle / 2 + angleStep * index;
-        const sprite = new CardSprite(scene, startXPos, startYPos, ASSET_KEYS.CARDS, getCardFrame(card), card, CARD_SCALE);
+        const angle = layout.isMobile ? 0 : (-fanAngle / 2 + angleStep * index);
+        const sprite = new CardSprite(scene, startXPos, startYPos, ASSET_KEYS.CARDS, getCardFrame(card), card, cardScale);
 
         sprite.originalAngle = angle;
         sprite.setAngle(from ? 0 : angle);
@@ -119,16 +152,50 @@ export function renderPlayerHand(
     });
 }
 
-function createCard(scene: Phaser.Scene, x: number, y: number): Phaser.GameObjects.Image {
-    return scene.add.image(x - 10, y, ASSET_KEYS.CARDS, CARD_BACK_FRAME).setOrigin(0.5).setScale(CARD_SCALE);
+function createCard(scene: Phaser.Scene, x: number, y: number, cardScale: number): Phaser.GameObjects.Image {
+    return scene.add.image(x, y, ASSET_KEYS.CARDS, CARD_BACK_FRAME).setOrigin(0.5).setScale(cardScale);
 }
 
 export function createPlayerUI(scene: Phaser.Scene, player: PlayerState): PlayerAnchor {
+    const layout = getUILayout(scene);
+
+    if (layout.isMobile) {
+        // Mobile: slim bottom bar — avatar + name, menu buttons go here too
+        const barHeight = layout.pctH(6);
+        const barY = layout.height - barHeight;
+        const avatarRadius = Math.round(barHeight * 0.38);
+        const avatarSize = avatarRadius * 2;
+        const avatarX = layout.pctW(2);
+        const avatarY = barY + (barHeight - avatarSize) / 2;
+
+        scene.add.rectangle(0, barY, layout.width, barHeight, 0x002200, 1).setOrigin(0, 0).setDepth(5);
+
+        loadAvatar(scene, player.getProfile().photo, `avatar-${player.id}`, avatarX, avatarY, avatarSize);
+        const circle = scene.add.circle(avatarX, avatarY, avatarRadius)
+            .setOrigin(0, 0)
+            .setFillStyle(0x000000, 0.5)
+            .setStrokeStyle(3, player.getProfile().color.hex);
+        circle.setDepth(6);
+
+        scene.add.text(avatarX + avatarSize + layout.pctW(2), barY + barHeight / 2, player.getProfile().name, {
+            fontSize: `${Math.max(13, Math.round(layout.width / 30))}px`,
+            color: '#ffffff',
+            fontStyle: 'bold'
+        }).setOrigin(0, 0.5).setDepth(6);
+
+        return {
+            x: layout.centerX,
+            y: layout.pctH(48), // trick card anchor for local player — below center
+            position: 'bottom'
+        };
+    }
+
+    // Desktop: original layout
     const barHeight = 80;
     const profileImageRadius = 50;
     const avatarSize = profileImageRadius * 2;
     const barY = scene.scale.height - barHeight;
-    const avatarX = 30;
+    const avatarX = layout.safeSide;
     const avatarY = barY - (profileImageRadius + 20);
 
     scene.add.rectangle(0, barY, scene.scale.width, barHeight).setOrigin(0, 0).setFillStyle(0x002200, 1);
@@ -140,7 +207,9 @@ export function createPlayerUI(scene: Phaser.Scene, player: PlayerState): Player
         .setFillStyle(0x000000, 0.5)
         .setStrokeStyle(8, player.getProfile().color.hex);
 
-    scene.add.text(avatarSize + 50, barY + 25, `Player: ${player.getProfile().name}`, { fontSize: '2.5vh' });
+    scene.add.text(avatarSize + 50, barY + 25, `Player: ${player.getProfile().name}`, {
+        fontSize: '18px'
+    });
 
     return {
         x: avatarX + avatarSize + 80,
@@ -181,9 +250,111 @@ function isBotPlayer(player: PlayerState): boolean {
 }
 
 export function createSidePlayerUI(scene: Phaser.Scene, player: PlayerState, position: 'left' | 'top' | 'right', isBot: boolean): PlayerAnchor {
+    const layout = getUILayout(scene);
+
+    if (layout.isMobile) {
+        // Mobile: wider pill badges along the top with bid integrated inside
+        const pillHeight = layout.pctH(5);
+        const avatarRadius = Math.round(pillHeight * 0.38);
+        const avatarSize = avatarRadius * 2;
+        const pillPadding = layout.pctW(1.5);
+        const fontSize = Math.max(14, Math.round(layout.width / 28));
+
+        // Position pills: left → top-left, top → top-center, right → top-right
+        const pillY = layout.pctH(1);
+        let pillX: number;
+        const pillWidth = layout.pctW(31);
+
+        if (position === 'left') {
+            pillX = layout.pctW(1);
+        } else if (position === 'right') {
+            pillX = layout.width - layout.pctW(1) - pillWidth;
+        } else {
+            pillX = layout.centerX - pillWidth / 2;
+        }
+
+        // Pill background
+        const panel = scene.add.graphics();
+        panel.fillStyle(0x1c1f26, 0.92);
+        panel.lineStyle(2, player.getProfile().color.hex, 0.9);
+        panel.fillRoundedRect(pillX, pillY, pillWidth, pillHeight, pillHeight / 2);
+        panel.strokeRoundedRect(pillX, pillY, pillWidth, pillHeight, pillHeight / 2);
+
+        // Avatar
+        const avatarX = pillX + pillPadding;
+        const avatarY = pillY + (pillHeight - avatarSize) / 2;
+        loadAvatar(scene, player.getProfile().photo, `avatar-${player.id}`, avatarX, avatarY, avatarSize);
+        scene.add.circle(avatarX, avatarY, avatarRadius)
+            .setOrigin(0, 0)
+            .setFillStyle(0x000000, 0.5)
+            .setStrokeStyle(2, player.getProfile().color.hex);
+
+        // Name — truncate to leave room for bid on the right
+        const nameX = avatarX + avatarSize + pillPadding;
+        const bidAreaWidth = layout.pctW(8); // reserve space for bid number on right
+        const maxNameWidth = pillWidth - avatarSize - pillPadding * 3 - bidAreaWidth - (isBot ? 30 : 0);
+        const nameText = scene.add.text(nameX, pillY + pillHeight / 2, player.getProfile().name, {
+            fontSize: `${fontSize}px`,
+            color: '#ffffff',
+            fontStyle: 'bold'
+        }).setOrigin(0, 0.5);
+
+        if (nameText.width > maxNameWidth) {
+            nameText.setStyle({ ...nameText.style, fixedWidth: maxNameWidth });
+            nameText.setCrop(0, 0, maxNameWidth, nameText.height);
+        }
+
+        // Bot badge — small, next to name
+        if (isBot) {
+            const badgeX = nameX + Math.min(nameText.width, maxNameWidth) + 4;
+            const badgeY = pillY + pillHeight / 2;
+            const badgeBg = scene.add.graphics();
+            badgeBg.fillStyle(0xffd24a, 1);
+            badgeBg.fillRoundedRect(badgeX, badgeY - 7, 24, 14, 5);
+            scene.add.text(badgeX + 12, badgeY, 'BOT', {
+                fontSize: '8px',
+                color: '#1a1a1a',
+                fontStyle: 'bold'
+            }).setOrigin(0.5);
+        }
+
+        // Bid text — right-aligned inside the pill
+        const bidText = scene.add.text(pillX + pillWidth - pillPadding - 2, pillY + pillHeight / 2, '--', {
+            fontSize: `${fontSize + 1}px`,
+            color: '#f7d560',
+            fontStyle: 'bold'
+        }).setOrigin(1, 0.5);
+
+        // Turn highlight
+        const turnHighlight = scene.add.graphics();
+        turnHighlight.lineStyle(2, 0xf7d560, 0.9);
+        turnHighlight.strokeRoundedRect(pillX - 2, pillY - 2, pillWidth + 4, pillHeight + 4, pillHeight / 2 + 2);
+        turnHighlight.setAlpha(0);
+
+        // Trick card anchor — in the play area, spread by position
+        let anchorX: number;
+        const anchorY = layout.pctH(35);
+        if (position === 'left') {
+            anchorX = layout.pctW(30);
+        } else if (position === 'right') {
+            anchorX = layout.pctW(70);
+        } else {
+            anchorX = layout.centerX;
+        }
+
+        return {
+            x: anchorX,
+            y: anchorY,
+            position,
+            turnHighlight,
+            bidText
+        };
+    }
+
+    // ---- Desktop layout ----
     const profileImageRadius = 32;
     const avatarSize = profileImageRadius * 2;
-    const margin = 28;
+    const margin = layout.safeSide;
     const panelPadding = 14;
     const panelWidth = position === 'top' ? 260 : 220;
     const panelHeight = 88;
@@ -203,7 +374,7 @@ export function createSidePlayerUI(scene: Phaser.Scene, player: PlayerState, pos
 
     if (position === 'top') {
         panelX = scene.scale.width / 2 - panelWidth / 2;
-        panelY = margin;
+        panelY = layout.safeTop;
     }
 
     const shadow = scene.add.graphics();
@@ -239,11 +410,6 @@ export function createSidePlayerUI(scene: Phaser.Scene, player: PlayerState, pos
 
     const baseTextX = avatarX + avatarSize + 12;
     const profile = player.getProfile();
-    /**
-     * Indicates whether the current participant should be treated as a bot.
-     * Determined by checking an explicit `isBot` flag on the profile or player,
-     * or by matching "bot" in the profile name.
-     */
     const botBadgeWidth = 36;
     const botBadgeHeight = 16;
     const botBadgeX = baseTextX;
@@ -343,10 +509,13 @@ function loadAvatar(scene: Phaser.Scene, url: string, key: string, x: number, y:
 }
 
 export function createButton(scene: Phaser.Scene, x: number, y: number, label: string, onClick: () => void): Phaser.GameObjects.Text {
+    const layout = getUILayout(scene);
+    const fontSize = layout.isMobile ? 20 : 24;
+    const padding = 10;
     const button = scene.add.text(x, y, label)
         .setOrigin(0.5)
-        .setPadding(10)
-        .setStyle({ backgroundColor: '#111', fontSize: '24px' })
+        .setPadding(padding)
+        .setStyle({ backgroundColor: '#111', fontSize: `${fontSize}px` })
         .setInteractive({ useHandCursor: true })
         .on('pointerdown', () => {
             scene.sound.play(ASSET_KEYS.AUDIO_BUTTON_3, { volume: 0.3 });
@@ -359,8 +528,9 @@ export function createButton(scene: Phaser.Scene, x: number, y: number, label: s
 }
 
 export function createMenuButtons(scene: Phaser.Scene, actions: Partial<Record<MenuItemId, () => void>> = {}) {
-    const buttonSize = 40;
-    const spacing = 15;
+    const layout = getUILayout(scene);
+    const buttonSize = layout.isMobile ? 32 : 40;
+    const spacing = layout.isMobile ? 10 : 15;
     const iconScale = 0.6;
     const cornerRadius = 8;
 
@@ -371,8 +541,16 @@ export function createMenuButtons(scene: Phaser.Scene, actions: Partial<Record<M
     };
 
     const totalWidth = (MENU_ITEMS.length * buttonSize) + ((MENU_ITEMS.length - 1) * spacing);
-    let x = scene.scale.width - totalWidth - 20 + (buttonSize / 2);
-    const y = 40;
+    // On mobile, put menu buttons in the bottom-right corner (inside the player bar)
+    let x: number;
+    let y: number;
+    if (layout.isMobile) {
+        x = layout.width - totalWidth - layout.pctW(2) + (buttonSize / 2);
+        y = layout.height - layout.pctH(3.5);
+    } else {
+        x = scene.scale.width - totalWidth - layout.safeSide + (buttonSize / 2);
+        y = layout.safeTop;
+    }
 
     MENU_ITEMS.forEach((item) => {
         const container = scene.add.container(x, y);
@@ -455,13 +633,16 @@ export function createChatWindow(
     scene: Phaser.Scene,
     options: { onClose: () => void; title?: string; width?: number; height?: number } 
 ): ChatWindow {
-    const width = options.width ?? 360;
-    const height = options.height ?? 320;
-    const panelX = scene.scale.width - width - 24;
-    const panelY = 80;
+    const layout = getUILayout(scene);
+    const maxWidth = layout.width - layout.safeSide * 2;
+    const maxHeight = layout.height - layout.safeTop - layout.safeBottom - 60;
+    const width = Math.min(options.width ?? (layout.isMobile ? maxWidth : 360), maxWidth);
+    const height = Math.min(options.height ?? (layout.isMobile ? maxHeight * 0.65 : 320), maxHeight);
+    const panelX = layout.isMobile ? layout.safeSide : layout.width - width - layout.safeSide;
+    const panelY = layout.safeTop + 40;
     const padding = 14;
     const headerHeight = 28;
-    const inputHeight = 40;
+    const inputHeight = layout.isMobile ? 36 : 40;
     const inputGap = 10;
 
     const container = scene.add.container(0, 0);
@@ -563,7 +744,9 @@ export function createAlertToast(
     message: string,
     options: { width?: number; bgColor?: number; textColor?: string } = {}
 ): AlertToast {
-    const width = options.width ?? 360;
+    const layout = getUILayout(scene);
+    const maxWidth = layout.width - layout.safeSide * 2;
+    const width = Math.min(options.width ?? (layout.isMobile ? maxWidth : 360), maxWidth);
     const paddingX = 16;
     const paddingY = 12;
     const textColor = options.textColor ?? '#f9fafb';
@@ -633,11 +816,12 @@ export function createBidBubble(
 }
 
 export function createBidModal(scene: Phaser.Scene, maxBid: number, onSelect: (bid: number) => void): Phaser.GameObjects.Container {
+    const layout = getUILayout(scene);
     const container = scene.add.container(0, 0);
     const overlay = scene.add.rectangle(0, 0, scene.scale.width, scene.scale.height, 0x000000, 0.5).setOrigin(0, 0);
 
-    const panelWidth = 320;
-    const panelHeight = 400;
+    const panelWidth = Math.min(layout.isMobile ? 300 : 320, layout.width - layout.safeSide * 2);
+    const panelHeight = Math.min(layout.isMobile ? 340 : 400, layout.height - layout.safeTop - layout.safeBottom);
     const panelX = scene.scale.width / 2 - panelWidth / 2;
     const panelY = scene.scale.height / 2 - panelHeight / 2;
 
@@ -662,7 +846,7 @@ export function createBidModal(scene: Phaser.Scene, maxBid: number, onSelect: (b
 
     // Keyboard layout
     const buttons: (Phaser.GameObjects.Graphics | Phaser.GameObjects.Text | Phaser.GameObjects.Rectangle)[] = [];
-    const buttonSize = 80;
+    const buttonSize = layout.isMobile ? 64 : 80;
     const buttonGap = 8;
     const keypadStartY = panelY + 60;
     const keypadStartX = panelX + (panelWidth - (3 * buttonSize + 2 * buttonGap)) / 2;
@@ -776,7 +960,7 @@ export function createBidModal(scene: Phaser.Scene, maxBid: number, onSelect: (b
         drawButton(isDisabled ? 'disabled' : 'normal');
 
         const text = scene.add.text(x + width / 2, y + height / 2, `${value}`, {
-            fontSize: '24px',
+            fontSize: `${layout.isMobile ? 20 : 24}px`,
             color: isDisabled ? '#6b7280' : '#1f2937',
             fontStyle: 'bold'
         }).setOrigin(0.5);
@@ -878,9 +1062,11 @@ export function animateTrumpSelection(
     const anchor = drawPileCards[0];
     const startX = anchor.x;
     const startY = anchor.y;
-    const cardWidth = CARD_WIDTH * CARD_SCALE;
+    const layout = getUILayout(scene);
+    const deckScale = layout.isMobile ? getTrickCardScale(scene) : getCardScale(scene);
+    const cardWidth = CARD_WIDTH * deckScale;
 
-    const sprite = new CardSprite(scene, startX, startY, ASSET_KEYS.CARDS, getCardFrame(trumpCard), trumpCard, CARD_SCALE);
+    const sprite = new CardSprite(scene, startX, startY, ASSET_KEYS.CARDS, getCardFrame(trumpCard), trumpCard, deckScale);
     sprite.setDepth(12);
     sprite.setAlpha(0);
 
@@ -909,8 +1095,10 @@ function showTrumpCardText(scene: Phaser.Scene, trumpCard: Card | null) {
     trumpCardText?.destroy();
     trumpCardText = null;
 
-    const centerX = scene.scale.width / 2;
-    const centerY = scene.scale.height / 2 - 260;
+    const layout = getUILayout(scene);
+    const centerX = layout.centerX;
+    // On mobile, show between pills and trick area; on desktop, high up
+    const centerY = layout.isMobile ? layout.pctH(15) : (layout.centerY - 260);
 
     const prefix = 'The trump suit is ';
     const suitLabel = trumpCard.suit;
@@ -918,14 +1106,15 @@ function showTrumpCardText(scene: Phaser.Scene, trumpCard: Card | null) {
     const isRedSuit = suitColorKey === CARD_SUIT_COLOR.RED;
     const suitColor = isRedSuit ? '#ef4444' : '#111111';
 
+    const mobileFontSize = Math.max(16, Math.round(layout.width / 22));
     const prefixText = scene.add.text(0, 0, prefix, {
-        fontSize: '25px',
+        fontSize: `${layout.isMobile ? mobileFontSize : 25}px`,
         color: '#ffffff',
         fontStyle: 'bold'
     }).setOrigin(0, 0.5);
 
     const suitText = scene.add.text(0, 0, suitLabel, {
-        fontSize: '25px',
+        fontSize: `${layout.isMobile ? mobileFontSize : 25}px`,
         color: suitColor,
         fontStyle: '900'
     }).setOrigin(0, 0.5);
@@ -946,20 +1135,25 @@ export function moveDrawPileToTopLeft(
         return { x: 0, y: 0 };
     }
 
-    const margin = 24;
-    const cardWidth = CARD_WIDTH * CARD_SCALE;
-    const cardHeight = CARD_HEIGHT * CARD_SCALE;
+    const layout = getUILayout(scene);
+    const margin = layout.safeSide;
+    const deckScale = layout.isMobile ? getTrickCardScale(scene) : getCardScale(scene);
+    const cardWidth = CARD_WIDTH * deckScale;
+    const cardHeight = CARD_HEIGHT * deckScale;
     const targetX = cardWidth / 2 + margin;
-    const targetY = cardHeight / 2 + margin;
+    // On mobile, push below the pill badges
+    const targetY = cardHeight / 2 + margin + (layout.isMobile ? layout.pctH(8) : 0);
 
     scene.sound.play(ASSET_KEYS.AUDIO_TRUMP_MOVE);
 
     if (trumpCardText) {
+        const textTargetX = layout.isMobile ? targetX + 50 : targetX + 80;
+        const textTargetY = layout.isMobile ? targetY + cardHeight * 0.8 : targetY + 90;
         scene.tweens.add({
             targets: trumpCardText,
-            x: targetX + 80,
-            y: targetY + 90,
-            scale: 0.70,
+            x: textTargetX,
+            y: textTargetY,
+            scale: layout.isMobile ? 0.55 : 0.70,
             duration: 300,
             ease: 'Cubic.easeOut'
         });
@@ -990,12 +1184,14 @@ export function renderTrumpCardNextToDeck(
 
     existing?.destroy();
 
-    const margin = 24;
-    const cardWidth = CARD_WIDTH * CARD_SCALE;
+    const layout = getUILayout(scene);
+    const margin = layout.safeSide;
+    const deckScale = layout.isMobile ? getTrickCardScale(scene) : getCardScale(scene);
+    const cardWidth = CARD_WIDTH * deckScale;
     const x = deckPosition.x + cardWidth + margin;
     const y = deckPosition.y;
 
-    const sprite = new CardSprite(scene, x, y, ASSET_KEYS.CARDS, getCardFrame(trumpCard), trumpCard, CARD_SCALE);
+    const sprite = new CardSprite(scene, x, y, ASSET_KEYS.CARDS, getCardFrame(trumpCard), trumpCard, deckScale);
     sprite.setDepth(10);
     return sprite;
 }
@@ -1011,15 +1207,21 @@ export function renderTrickCards(
         return [];
     }
 
-    const centerX = scene.scale.width / 2;
-    const centerY = scene.scale.height / 2 - 10;
+    const layout = getUILayout(scene);
+    const centerX = layout.centerX;
+    // On mobile, center the trick area lower — between pills and hand
+    const centerY = layout.isMobile ? layout.pctH(45) : (layout.centerY - 10);
+    const offsetSmall = layout.isMobile ? 36 : 50;
+    const offsetLarge = layout.isMobile ? 44 : 60;
+    const angleTilt = layout.isMobile ? 4 : 8;
+    const cardScale = layout.isMobile ? getTrickCardScale(scene) : getCardScale(scene);
     
     // Map player positions to card offsets
     const offsetMap: Record<PlayerAnchorPosition, { x: number; y: number; angle: number }> = {
-        'top': { x: 0, y: -50, angle: 0 },
-        'left': { x: -60, y: 0, angle: -8 },
-        'right': { x: 60, y: 0, angle: 8 },
-        'bottom': { x: 0, y: 60, angle: 0 }
+        'top': { x: 0, y: -offsetSmall, angle: 0 },
+        'left': { x: -offsetLarge, y: 0, angle: -angleTilt },
+        'right': { x: offsetLarge, y: 0, angle: angleTilt },
+        'bottom': { x: 0, y: offsetLarge, angle: 0 }
     };
 
     return cardsWithPositions.map(({ card, position }, index) => {
@@ -1031,16 +1233,16 @@ export function renderTrickCards(
             ASSET_KEYS.CARDS,
             getCardFrame(card),
             card,
-            CARD_SCALE
+            cardScale
         );
         sprite.setAngle(offset.angle);
         sprite.setDepth(20 + index);
         sprite.setAlpha(0);
-        sprite.setScale(CARD_SCALE * 0.85);
+        sprite.setScale(cardScale * 0.85);
         scene.tweens.add({
             targets: sprite,
             alpha: 1,
-            scale: CARD_SCALE,
+            scale: cardScale,
             duration: 260,
             ease: 'Cubic.easeOut'
         });
@@ -1054,14 +1256,15 @@ export function createRoundSummaryPanel(
     isHost: boolean,
     onContinue: () => void
 ): RoundSummaryPanel {
-    const panelWidth = 380;
+    const layout = getUILayout(scene);
+    const panelWidth = Math.min(layout.isMobile ? 340 : 380, layout.width - layout.safeSide * 2);
     const padding = 14;
     const headerHeight = 26;
     const rowHeight = 22;
     const footerHeight = 54;
     const height = padding * 2 + headerHeight + rowHeight * (summary.results.length + 1) + footerHeight;
-    const x = scene.scale.width - panelWidth - 20;
-    const y = scene.scale.height - height - 20;
+    const x = scene.scale.width - panelWidth - layout.safeSide;
+    const y = scene.scale.height - height - layout.safeBottom;
 
     const container = scene.add.container(x, y);
     const textNodes: Phaser.GameObjects.Text[] = [];
@@ -1081,15 +1284,20 @@ export function createRoundSummaryPanel(
     container.add(title);
 
     let currentY = padding + headerHeight;
+    const colBid = Math.round(panelWidth * 0.46);
+    const colTricks = Math.round(panelWidth * 0.57);
+    const colPts = Math.round(panelWidth * 0.72);
+    const colTotal = Math.round(panelWidth * 0.83);
+    const hdrFontSize = '12px';
     const header = scene.add.text(padding, currentY, 'Player', {
-        fontSize: '12px',
+        fontSize: hdrFontSize,
         color: '#9aa0a6',
         fontStyle: 'bold'
     });
-    const headerBid = scene.add.text(190, currentY, 'Bid', { fontSize: '12px', color: '#9aa0a6', fontStyle: 'bold' });
-    const headerTricks = scene.add.text(230, currentY, 'Tricks', { fontSize: '12px', color: '#9aa0a6', fontStyle: 'bold' });
-    const headerPoints = scene.add.text(290, currentY, 'Pts', { fontSize: '12px', color: '#9aa0a6', fontStyle: 'bold' });
-    const headerTotal = scene.add.text(330, currentY, 'Total', { fontSize: '12px', color: '#9aa0a6', fontStyle: 'bold' });
+    const headerBid = scene.add.text(colBid, currentY, 'Bid', { fontSize: hdrFontSize, color: '#9aa0a6', fontStyle: 'bold' });
+    const headerTricks = scene.add.text(colTricks, currentY, 'Tricks', { fontSize: hdrFontSize, color: '#9aa0a6', fontStyle: 'bold' });
+    const headerPoints = scene.add.text(colPts, currentY, 'Pts', { fontSize: hdrFontSize, color: '#9aa0a6', fontStyle: 'bold' });
+    const headerTotal = scene.add.text(colTotal, currentY, 'Total', { fontSize: hdrFontSize, color: '#9aa0a6', fontStyle: 'bold' });
     container.add(header);
     container.add(headerBid);
     container.add(headerTricks);
@@ -1097,15 +1305,16 @@ export function createRoundSummaryPanel(
     container.add(headerTotal);
 
     currentY += rowHeight;
+    const rowFontSize = '13px';
     summary.results.forEach((result) => {
         const name = scene.add.text(padding, currentY, result.playerName, {
-            fontSize: '13px',
+            fontSize: rowFontSize,
             color: result.color ?? '#ffffff'
         });
-        const bidText = scene.add.text(200, currentY, `${result.bid}`, { fontSize: '13px', color: '#ffffff' });
-        const tricksText = scene.add.text(240, currentY, `${result.tricks}`, { fontSize: '13px', color: '#ffffff' });
-        const pointsText = scene.add.text(292, currentY, `${result.points}`, { fontSize: '13px', color: '#f7d560' });
-        const totalText = scene.add.text(334, currentY, `${result.total}`, { fontSize: '13px', color: '#ffffff' });
+        const bidText = scene.add.text(colBid + 10, currentY, `${result.bid}`, { fontSize: rowFontSize, color: '#ffffff' });
+        const tricksText = scene.add.text(colTricks + 10, currentY, `${result.tricks}`, { fontSize: rowFontSize, color: '#ffffff' });
+        const pointsText = scene.add.text(colPts + 2, currentY, `${result.points}`, { fontSize: rowFontSize, color: '#f7d560' });
+        const totalText = scene.add.text(colTotal + 4, currentY, `${result.total}`, { fontSize: rowFontSize, color: '#ffffff' });
 
         container.add(name);
         container.add(bidText);

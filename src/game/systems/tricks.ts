@@ -1,4 +1,5 @@
-import { ASSET_KEYS, CARD_SCALE } from '@/lib/common';
+import { ASSET_KEYS } from '@/lib/common';
+import { getCardScale, getTrickCardScale, getUILayout } from '@/lib/layout';
 import { deserializeCards, SerializedCard } from '@/lib/gameLogic';
 import { getParticipants, getState, setState } from 'playroomkit';
 import type { Game } from '@/game/scenes/Game';
@@ -57,12 +58,14 @@ export function animateTrickWinner(game: Game, winnerId: string): void {
     }
 
     if (game.trickSprites.length) {
+        const layout = getUILayout(game);
+        const shrinkScale = layout.isMobile ? getTrickCardScale(game) * 0.5 : getCardScale(game) * 0.5;
         game.tweens.add({
             targets: game.trickSprites,
             alpha: 0,
             x: anchor.x,
             y: anchor.y,
-            scale: CARD_SCALE * 0.5,
+            scale: shrinkScale,
             duration: 800,
             ease: 'Power2',
             stagger: 80
