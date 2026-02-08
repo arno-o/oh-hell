@@ -46,6 +46,11 @@ export function updateBiddingUI(game: Game): void {
             anchor.bidText.setText(bid == null ? '--' : `${tricks}/${bid}`);
         }
 
+        if (anchor?.scoreText) {
+            const score = (player.getState('score') as number | undefined) ?? 0;
+            anchor.scoreText.setText(`${score}`);
+        }
+
         if (bid == null && previous != null) {
             game.bidBubbles[player.id]?.destroy();
             game.bidBubbles[player.id] = undefined as unknown as Phaser.GameObjects.Container;

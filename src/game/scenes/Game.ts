@@ -1,5 +1,5 @@
 import { Scene } from 'phaser';
-import { AlertToast, animateTrumpSelection, ChatWindow, createDrawPile, createMenuButtons, createOtherPlayersUI, createPlayerUI, createRoundSummaryPanel, moveDrawPileToTopLeft, PlayerAnchor, renderPlayerHand, renderTrickCards, renderTrumpCardNextToDeck, RoundSummaryData } from '@/lib/ui';
+import { AlertToast, animateTrumpSelection, ChatWindow, createDrawPile, createMenuButtons, createOtherPlayersUI, createPlayerUI, createRoundSummaryPanel, moveDrawPileToTopLeft, PlayerAnchor, renderPlayerHand, renderTrickCards, renderTrumpCardNextToDeck, RoundSummaryData, SettingsWindow } from '@/lib/ui';
 import { getUILayout } from '@/lib/layout';
 import { ASSET_KEYS } from '@/lib/common';
 import { Card, createDeck, shuffleDeck } from '@/lib/deck';
@@ -13,6 +13,8 @@ import { toggleChatWindow, closeChatWindow, updateChatFromState } from '@/game/s
 import { enqueueAlert, flushAlertQueue, positionAlerts, captureParticipantSnapshot, checkParticipantChanges, checkHostChanges, checkRoundAlerts, checkGameOverAlert, fillMissingBots } from '@/game/systems/alerts';
 import { addPlayerAnchorForJoin, isBotProfile, getTurnOrder } from '@/game/systems/players';
 import { syncLocalHandFromState } from '@/game/systems/handSync';
+import { toggleSettingsWindow, closeSettingsWindow } from '@/game/systems/settings';
+import { isSoundEnabled } from '@/lib/settings';
 
 export class Game extends Scene {
     // -- Game State --
@@ -44,6 +46,11 @@ export class Game extends Scene {
     public chatIgnoreNextPointer = false;
     public chatInputFocused = false;
     public chatMessageNodes: Phaser.GameObjects.Text[] = [];
+
+    // -- Settings --
+    public settingsWindow?: SettingsWindow;
+    public settingsOpen = false;
+    public settingsKeyHandler?: (event: KeyboardEvent) => void;
 
     // -- State Tracking --
     public lastDealId = 0;
@@ -109,6 +116,7 @@ export class Game extends Scene {
         this.events.on(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this);
 
         this.cameras.main.setBackgroundColor('#074924');
+        this.sound.mute = !isSoundEnabled();
         this.deck = shuffleDeck(createDeck());
         this.runGameSetup(this);
         this.captureParticipantSnapshot();
@@ -147,6 +155,7 @@ export class Game extends Scene {
         this.botNextActionAt.clear();
         this.players = [];
         this.closeChatWindow();
+        this.closeSettingsWindow();
         if (this.pollTimer) {
             this.pollTimer.remove(false);
             this.pollTimer = undefined;
@@ -263,7 +272,7 @@ export class Game extends Scene {
         this.playerAnchors = { [localPlayer.id]: localAnchor, ...otherAnchors };
         createMenuButtons(scene, {
             chat: () => this.toggleChatWindow(),
-            settings: () => console.log('[Menu] Settings clicked')
+            settings: () => this.toggleSettingsWindow()
         });
     }
 
@@ -349,6 +358,14 @@ export class Game extends Scene {
 
     private closeChatWindow(): void {
         closeChatWindow(this);
+    }
+
+    private toggleSettingsWindow(): void {
+        toggleSettingsWindow(this);
+    }
+
+    private closeSettingsWindow(): void {
+        closeSettingsWindow(this);
     }
 
     private updateChatFromState(): void {

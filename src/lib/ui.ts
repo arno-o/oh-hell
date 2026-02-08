@@ -5,6 +5,7 @@ import { MENU_ITEMS } from '@/lib/common';
 import { Card } from '@/lib/card';
 import { getCardFrame } from '@/lib/deck';
 import { CardSprite } from '@/lib/cardSprite';
+import { isSoundEnabled, setSoundEnabled } from '@/lib/settings';
 
 export type PlayerAnchorPosition = 'bottom' | 'left' | 'top' | 'right';
 
@@ -14,6 +15,7 @@ export type PlayerAnchor = {
     position: PlayerAnchorPosition;
     turnHighlight?: Phaser.GameObjects.Graphics;
     bidText?: Phaser.GameObjects.Text;
+    scoreText?: Phaser.GameObjects.Text;
 };
 
 /**
@@ -80,7 +82,7 @@ export function renderPlayerHand(
         // Mobile: large cards in a horizontal strip.
         // Bottom portion gets clipped by the slim player bar — intentional,
         // since rank/suit are shown in the top-left corner of each card.
-        const bottomBarHeight = layout.pctH(6);
+        const bottomBarHeight = layout.pctH(9);
         handY = layout.height - bottomBarHeight - cardHeight * 0.42;
 
         const availableWidth = layout.width - layout.pctW(4);
@@ -158,63 +160,200 @@ function createCard(scene: Phaser.Scene, x: number, y: number, cardScale: number
 
 export function createPlayerUI(scene: Phaser.Scene, player: PlayerState): PlayerAnchor {
     const layout = getUILayout(scene);
+    const profile = player.getProfile();
+    const playerColor: number = profile.color.hex;
+    const score = (player.getState('score') as number | undefined) ?? 0;
 
     if (layout.isMobile) {
-        // Mobile: slim bottom bar — avatar + name, menu buttons go here too
-        const barHeight = layout.pctH(6);
+        // ── Mobile: compact bottom bar with avatar, name, bid & score ──
+        const barHeight = layout.pctH(9);
         const barY = layout.height - barHeight;
-        const avatarRadius = Math.round(barHeight * 0.38);
+        const avatarRadius = Math.round(barHeight * 0.40);
         const avatarSize = avatarRadius * 2;
-        const avatarX = layout.pctW(2);
+        const pad = layout.pctW(2.5);
+        const fontSize = Math.max(14, Math.round(layout.width / 26));
+
+        // Bar background — dark with subtle gradient feel
+        const barBg = scene.add.graphics().setDepth(50);
+        barBg.fillStyle(0x0d1117, 0.95);
+        barBg.fillRect(0, barY, layout.width, barHeight);
+        // Thin accent line at top of bar
+        barBg.lineStyle(2, playerColor, 0.6);
+        barBg.lineBetween(0, barY, layout.width, barY);
+
+        // Avatar
+        const avatarX = pad;
         const avatarY = barY + (barHeight - avatarSize) / 2;
-
-        scene.add.rectangle(0, barY, layout.width, barHeight, 0x002200, 1).setOrigin(0, 0).setDepth(5);
-
-        loadAvatar(scene, player.getProfile().photo, `avatar-${player.id}`, avatarX, avatarY, avatarSize);
-        const circle = scene.add.circle(avatarX, avatarY, avatarRadius)
+        loadAvatar(scene, profile.photo, `avatar-${player.id}`, avatarX, avatarY, avatarSize, 51);
+        scene.add.circle(avatarX, avatarY, avatarRadius)
             .setOrigin(0, 0)
-            .setFillStyle(0x000000, 0.5)
-            .setStrokeStyle(3, player.getProfile().color.hex);
-        circle.setDepth(6);
+            .setFillStyle(0x000000, 0.4)
+            .setStrokeStyle(3, playerColor)
+            .setDepth(51);
 
-        scene.add.text(avatarX + avatarSize + layout.pctW(2), barY + barHeight / 2, player.getProfile().name, {
-            fontSize: `${Math.max(13, Math.round(layout.width / 30))}px`,
+        // Name
+        const nameX = avatarX + avatarSize + pad;
+        scene.add.text(nameX, barY + barHeight * 0.30, profile.name, {
+            fontSize: `${fontSize}px`,
             color: '#ffffff',
             fontStyle: 'bold'
-        }).setOrigin(0, 0.5).setDepth(6);
+        }).setOrigin(0, 0.5).setDepth(51);
+
+        // Score label below name
+        scene.add.text(nameX, barY + barHeight * 0.70, 'PTS', {
+            fontSize: `${Math.max(11, fontSize - 2)}px`,
+            color: '#9aa0a6',
+            fontStyle: 'bold'
+        }).setOrigin(0, 0.5).setDepth(51);
+
+        const scoreText = scene.add.text(nameX + layout.pctW(8), barY + barHeight * 0.70, `${score}`, {
+            fontSize: `${Math.max(11, fontSize - 2)}px`,
+            color: '#ffffff',
+            fontStyle: 'bold'
+        }).setOrigin(0, 0.5).setDepth(51);
+
+        // Bid pill — right side of bar (before menu buttons area)
+        const bidPillW = layout.pctW(16);
+        const bidPillH = barHeight * 0.52;
+        const bidPillX = layout.width - layout.pctW(30) - bidPillW;
+        const bidPillY = barY + (barHeight - bidPillH) / 2;
+
+        const bidBg = scene.add.graphics().setDepth(51);
+        bidBg.fillStyle(0x2a2f3a, 1);
+        bidBg.fillRoundedRect(bidPillX, bidPillY, bidPillW, bidPillH, bidPillH / 2);
+        bidBg.lineStyle(1, 0x3d4450, 0.8);
+        bidBg.strokeRoundedRect(bidPillX, bidPillY, bidPillW, bidPillH, bidPillH / 2);
+
+        scene.add.text(bidPillX + 10, barY + barHeight / 2, 'BID', {
+            fontSize: `${Math.max(9, fontSize - 3)}px`,
+            color: '#9aa0a6',
+            fontStyle: 'bold'
+        }).setOrigin(0, 0.5).setDepth(52);
+
+        const bidText = scene.add.text(bidPillX + bidPillW - 10, barY + barHeight / 2, '--', {
+            fontSize: `${fontSize + 1}px`,
+            color: '#f7d560',
+            fontStyle: 'bold'
+        }).setOrigin(1, 0.5).setDepth(52);
+
+        // Turn highlight — glow along the top edge
+        const turnHighlight = scene.add.graphics().setDepth(51);
+        turnHighlight.lineStyle(3, 0xf7d560, 0.9);
+        turnHighlight.lineBetween(0, barY, layout.width, barY);
+        turnHighlight.setAlpha(0);
 
         return {
             x: layout.centerX,
-            y: layout.pctH(48), // trick card anchor for local player — below center
-            position: 'bottom'
+            y: layout.pctH(48),
+            position: 'bottom',
+            turnHighlight,
+            bidText,
+            scoreText
         };
     }
 
-    // Desktop: original layout
-    const barHeight = 80;
-    const profileImageRadius = 50;
+    // ── Desktop: full panel with avatar, name, bid & score ──
+    const panelWidth = 280;
+    const panelHeight = 96;
+    const cornerRadius = 16;
+    const profileImageRadius = 36;
     const avatarSize = profileImageRadius * 2;
-    const barY = scene.scale.height - barHeight;
-    const avatarX = layout.safeSide;
-    const avatarY = barY - (profileImageRadius + 20);
+    const panelPadding = 16;
+    const barY = scene.scale.height - panelHeight - 18;
+    const panelX = Math.max(12, Math.round(Math.min(layout.width, layout.height) * 0.02));
 
-    scene.add.rectangle(0, barY, scene.scale.width, barHeight).setOrigin(0, 0).setFillStyle(0x002200, 1);
+    // Panel shadow
+    const shadow = scene.add.graphics();
+    shadow.fillStyle(0x000000, 0.3);
+    shadow.fillRoundedRect(panelX + 3, barY + 5, panelWidth, panelHeight, cornerRadius);
 
-    loadAvatar(scene, player.getProfile().photo, `avatar-${player.id}`, avatarX, avatarY, avatarSize);
-    scene
-        .add.circle(avatarX, avatarY, profileImageRadius)
+    // Panel background
+    const panel = scene.add.graphics();
+    panel.fillStyle(0x1c1f26, 0.95);
+    panel.lineStyle(2, playerColor, 0.8);
+    panel.fillRoundedRect(panelX, barY, panelWidth, panelHeight, cornerRadius);
+    panel.strokeRoundedRect(panelX, barY, panelWidth, panelHeight, cornerRadius);
+
+    // Subtle highlight at top
+    const highlight = scene.add.graphics();
+    highlight.fillStyle(0xffffff, 0.06);
+    highlight.fillRoundedRect(panelX + 2, barY + 2, panelWidth - 4, 20, cornerRadius - 2);
+
+    // Avatar
+    const avatarX = panelX + panelPadding;
+    const avatarY = barY + (panelHeight - avatarSize) / 2;
+    loadAvatar(scene, profile.photo, `avatar-${player.id}`, avatarX, avatarY, avatarSize);
+    scene.add.circle(avatarX, avatarY, profileImageRadius)
         .setOrigin(0, 0)
         .setFillStyle(0x000000, 0.5)
-        .setStrokeStyle(8, player.getProfile().color.hex);
+        .setStrokeStyle(4, playerColor);
 
-    scene.add.text(avatarSize + 50, barY + 25, `Player: ${player.getProfile().name}`, {
-        fontSize: '18px'
-    });
+    // Text column
+    const textX = avatarX + avatarSize + 14;
+
+    // Name
+    scene.add.text(textX, barY + 16, profile.name, {
+        fontSize: '16px',
+        color: '#ffffff',
+        fontStyle: 'bold'
+    }).setOrigin(0, 0);
+
+    // Score row
+    scene.add.text(textX, barY + panelHeight - 26, 'PTS', {
+        fontSize: '11px',
+        color: '#9aa0a6',
+        fontStyle: 'bold'
+    }).setOrigin(0, 0.5);
+
+    const scoreBgW = 44;
+    const scoreBgH = 20;
+    const scoreBgX = textX + 26;
+    const scoreBgY = barY + panelHeight - 26 - scoreBgH / 2;
+    const scoreBg = scene.add.graphics();
+    scoreBg.fillStyle(0x2a2f3a, 1);
+    scoreBg.fillRoundedRect(scoreBgX, scoreBgY, scoreBgW, scoreBgH, 8);
+
+    const scoreText = scene.add.text(scoreBgX + scoreBgW / 2, barY + panelHeight - 26, `${score}`, {
+        fontSize: '13px',
+        color: '#ffffff',
+        fontStyle: 'bold'
+    }).setOrigin(0.5, 0.5);
+
+    // Bid row — right of score
+    const bidLabelX = scoreBgX + scoreBgW + 14;
+    scene.add.text(bidLabelX, barY + panelHeight - 26, 'BID', {
+        fontSize: '11px',
+        color: '#9aa0a6',
+        fontStyle: 'bold'
+    }).setOrigin(0, 0.5);
+
+    const bidBgW = 44;
+    const bidBgH = 20;
+    const bidBgX = bidLabelX + 28;
+    const bidBgY = barY + panelHeight - 26 - bidBgH / 2;
+    const bidBg = scene.add.graphics();
+    bidBg.fillStyle(0x2a2f3a, 1);
+    bidBg.fillRoundedRect(bidBgX, bidBgY, bidBgW, bidBgH, 8);
+
+    const bidText = scene.add.text(bidBgX + bidBgW / 2, barY + panelHeight - 26, '--', {
+        fontSize: '14px',
+        color: '#f7d560',
+        fontStyle: 'bold'
+    }).setOrigin(0.5, 0.5);
+
+    // Turn highlight — glowing border around the panel
+    const turnHighlight = scene.add.graphics();
+    turnHighlight.lineStyle(3, 0xf7d560, 0.9);
+    turnHighlight.strokeRoundedRect(panelX - 2, barY - 2, panelWidth + 4, panelHeight + 4, cornerRadius + 2);
+    turnHighlight.setAlpha(0);
 
     return {
-        x: avatarX + avatarSize + 80,
-        y: barY - 22,
-        position: 'bottom'
+        x: panelX + panelWidth + 40,
+        y: barY + panelHeight / 2,
+        position: 'bottom',
+        turnHighlight,
+        bidText,
+        scoreText
     };
 }
 
@@ -354,7 +493,8 @@ export function createSidePlayerUI(scene: Phaser.Scene, player: PlayerState, pos
     // ---- Desktop layout ----
     const profileImageRadius = 32;
     const avatarSize = profileImageRadius * 2;
-    const margin = layout.safeSide;
+    // Use a uniform margin so side and top panels feel equally spaced
+    const margin = Math.max(12, Math.round(Math.min(layout.width, layout.height) * 0.02));
     const panelPadding = 14;
     const panelWidth = position === 'top' ? 260 : 220;
     const panelHeight = 88;
@@ -374,7 +514,7 @@ export function createSidePlayerUI(scene: Phaser.Scene, player: PlayerState, pos
 
     if (position === 'top') {
         panelX = scene.scale.width / 2 - panelWidth / 2;
-        panelY = layout.safeTop;
+        panelY = margin;
     }
 
     const shadow = scene.add.graphics();
@@ -491,10 +631,11 @@ export function createSidePlayerUI(scene: Phaser.Scene, player: PlayerState, pos
     };
 }
 
-function loadAvatar(scene: Phaser.Scene, url: string, key: string, x: number, y: number, size: number) {
+function loadAvatar(scene: Phaser.Scene, url: string, key: string, x: number, y: number, size: number, depth?: number) {
     const add = () => {
         const r = size / 2;
         const img = scene.add.image(x, y, key).setOrigin(0, 0).setDisplaySize(size, size);
+        if (depth !== undefined) img.setDepth(depth);
         const mask = scene.add.circle(x + r, y + r, r, 0xffffff, 0);
         img.setMask(mask.createGeometryMask());
     };
@@ -546,14 +687,16 @@ export function createMenuButtons(scene: Phaser.Scene, actions: Partial<Record<M
     let y: number;
     if (layout.isMobile) {
         x = layout.width - totalWidth - layout.pctW(2) + (buttonSize / 2);
-        y = layout.height - layout.pctH(3.5);
+        y = layout.height - layout.pctH(4.5);
     } else {
-        x = scene.scale.width - totalWidth - layout.safeSide + (buttonSize / 2);
-        y = layout.safeTop;
+        const uniformMargin = Math.max(12, Math.round(Math.min(layout.width, layout.height) * 0.02));
+        x = scene.scale.width - totalWidth - uniformMargin + (buttonSize / 2);
+        y = uniformMargin + buttonSize / 2;
     }
 
     MENU_ITEMS.forEach((item) => {
         const container = scene.add.container(x, y);
+        if (layout.isMobile) container.setDepth(52);
         const bg = scene.add.graphics();
         drawBg(bg, 0xffffff);
         container.add(bg);
@@ -628,6 +771,301 @@ export type AlertToast = {
     container: Phaser.GameObjects.Container;
     height: number;
 };
+
+export type SettingsPlayerEntry = {
+    playerId: string;
+    playerName: string;
+    color: number;
+    isBot: boolean;
+};
+
+export type SettingsWindow = {
+    container: Phaser.GameObjects.Container;
+    panelBounds: Phaser.Geom.Rectangle;
+    // call to rebuild player rows (e.g. after a kick).
+    refreshPlayers: (players: SettingsPlayerEntry[]) => void;
+};
+
+export function createSettingsWindow(
+    scene: Phaser.Scene,
+    options: {
+        onClose: () => void;
+        isHost: boolean;
+        localPlayerId: string;
+        players: SettingsPlayerEntry[];
+        onKick?: (playerId: string) => void;
+        onLeave?: () => void;
+    }
+): SettingsWindow {
+    const layout = getUILayout(scene);
+    const maxWidth = layout.width - layout.safeSide * 2;
+    const maxHeight = layout.height - layout.safeTop - layout.safeBottom - 60;
+    const panelWidth = Math.min(layout.isMobile ? maxWidth : 400, maxWidth);
+    const padding = 18;
+    const headerHeight = 32;
+    const sectionGap = 18;
+    const toggleRowHeight = 44;
+    const playerRowHeight = 44;
+    const playerHeaderHeight = 28;
+    const leaveButtonHeight = 42;
+    const leaveButtonGap = 18;
+
+    // calculate panel height dynamically based on content
+    const playerSectionHeight = options.isHost
+        ? playerHeaderHeight + options.players.length * playerRowHeight + sectionGap
+        : 0;
+    const panelHeight = Math.min(
+        padding * 2 + headerHeight + sectionGap + toggleRowHeight + playerSectionHeight + leaveButtonGap + leaveButtonHeight + 12,
+        maxHeight
+    );
+
+    const panelX = Math.round(layout.centerX - panelWidth / 2);
+    const panelY = Math.round(layout.centerY - panelHeight / 2);
+
+    const container = scene.add.container(0, 0);
+    container.setDepth(130);
+
+    // dim overlay
+    const overlay = scene.add.rectangle(0, 0, layout.width, layout.height, 0x000000, 0.5).setOrigin(0, 0);
+    overlay.setInteractive(); // block clicks below
+    container.add(overlay);
+
+    // panel background
+    const panel = scene.add.graphics();
+    panel.fillStyle(0x111827, 0.97);
+    panel.lineStyle(2, 0x4b5563, 1);
+    panel.fillRoundedRect(panelX, panelY, panelWidth, panelHeight, 14);
+    panel.strokeRoundedRect(panelX, panelY, panelWidth, panelHeight, 14);
+    container.add(panel);
+
+    // header
+    const title = scene.add.text(panelX + padding, panelY + padding, 'Settings', {
+        fontSize: '18px',
+        color: '#f9fafb',
+        fontStyle: 'bold'
+    });
+    container.add(title);
+
+    const closeButton = scene.add.text(panelX + panelWidth - padding, panelY + padding - 2, '×', {
+        fontSize: '22px',
+        color: '#e5e7eb'
+    }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
+    closeButton.on('pointerdown', () => options.onClose());
+    container.add(closeButton);
+
+    // sound toggl
+    let currentY = panelY + padding + headerHeight + sectionGap;
+    const soundSectionLabel = scene.add.text(panelX + padding, currentY, 'Sound', {
+        fontSize: '15px',
+        color: '#d1d5db',
+        fontStyle: 'bold'
+    });
+    container.add(soundSectionLabel);
+
+    const toggleW = 50;
+    const toggleH = 26;
+    const toggleX = panelX + panelWidth - padding - toggleW;
+    const toggleY = currentY - 2;
+    const toggleRadius = toggleH / 2;
+
+    let soundEnabled = isSoundEnabled();
+
+    const toggleBg = scene.add.graphics();
+    const knobRadius = toggleH / 2 - 3;
+
+    const knob = scene.add.circle(0, 0, knobRadius, 0xffffff);
+    container.add(toggleBg);
+    container.add(knob);
+
+    const drawToggle = (enabled: boolean, animate = false) => {
+        const bgColor = enabled ? 0x10b981 : 0x4b5563;
+        toggleBg.clear();
+        toggleBg.fillStyle(bgColor, 1);
+        toggleBg.fillRoundedRect(toggleX, toggleY, toggleW, toggleH, toggleRadius);
+
+        const targetKnobX = enabled
+            ? toggleX + toggleW - knobRadius - 4
+            : toggleX + knobRadius + 4;
+        const knobY = toggleY + toggleH / 2;
+
+        if (animate) {
+            scene.tweens.add({ targets: knob, x: targetKnobX, y: knobY, duration: 140, ease: 'Cubic.easeOut' });
+        } else {
+            knob.setPosition(targetKnobX, knobY);
+        }
+    };
+
+    drawToggle(soundEnabled);
+
+    const toggleHitArea = scene.add.rectangle(toggleX, toggleY, toggleW, toggleH, 0xffffff, 0.001)
+        .setOrigin(0, 0)
+        .setInteractive({ useHandCursor: true });
+    container.add(toggleHitArea);
+
+    toggleHitArea.on('pointerdown', () => {
+        soundEnabled = !soundEnabled;
+        setSoundEnabled(soundEnabled);
+        scene.sound.mute = !soundEnabled;
+        drawToggle(soundEnabled, true);
+        if (soundEnabled) {
+            scene.sound.play(ASSET_KEYS.AUDIO_UI_CLICK, { volume: 0.4 });
+        }
+    });
+
+    currentY += toggleRowHeight + sectionGap;
+
+    // host only player actions
+    const playerContainer = scene.add.container(0, 0);
+    container.add(playerContainer);
+
+    const buildPlayerRows = (players: SettingsPlayerEntry[]) => {
+        playerContainer.removeAll(true);
+
+        if (!options.isHost) return;
+
+        const sectionLabel = scene.add.text(panelX + padding, currentY, 'Players', {
+            fontSize: '15px',
+            color: '#d1d5db',
+            fontStyle: 'bold'
+        });
+        playerContainer.add(sectionLabel);
+
+        const divider = scene.add.graphics();
+        divider.lineStyle(1, 0x374151, 0.8);
+        divider.lineBetween(panelX + padding, currentY + 22, panelX + panelWidth - padding, currentY + 22);
+        playerContainer.add(divider);
+
+        let rowY = currentY + playerHeaderHeight;
+
+        players.forEach((entry) => {
+            const isLocal = entry.playerId === options.localPlayerId;
+
+            // player color dot
+            const dot = scene.add.circle(panelX + padding + 6, rowY + playerRowHeight / 2, 5, entry.color);
+            playerContainer.add(dot);
+
+            // name
+            const nameLabel = scene.add.text(panelX + padding + 20, rowY + playerRowHeight / 2, entry.playerName, {
+                fontSize: '14px',
+                color: '#e5e7eb'
+            }).setOrigin(0, 0.5);
+            playerContainer.add(nameLabel);
+
+            // bot badge
+            if (entry.isBot) {
+                const badgeX = nameLabel.x + nameLabel.width + 8;
+                const badgeBg = scene.add.graphics();
+                badgeBg.fillStyle(0xffd24a, 1);
+                badgeBg.fillRoundedRect(badgeX, rowY + playerRowHeight / 2 - 8, 30, 16, 5);
+                playerContainer.add(badgeBg);
+
+                const badgeText = scene.add.text(badgeX + 15, rowY + playerRowHeight / 2, 'BOT', {
+                    fontSize: '9px',
+                    color: '#1a1a1a',
+                    fontStyle: 'bold'
+                }).setOrigin(0.5);
+                playerContainer.add(badgeText);
+            }
+
+            // "(You)" label
+            if (isLocal) {
+                const youLabel = scene.add.text(
+                    panelX + panelWidth - padding - (entry.isBot ? 0 : 0),
+                    rowY + playerRowHeight / 2,
+                    '(You)',
+                    { fontSize: '12px', color: '#6b7280' }
+                ).setOrigin(1, 0.5);
+                playerContainer.add(youLabel);
+            }
+
+            // kick button — only for non-local, non-bot players
+            if (!isLocal && !entry.isBot && options.isHost) {
+                const kickBtnW = 52;
+                const kickBtnH = 26;
+                const kickBtnX = panelX + panelWidth - padding - kickBtnW;
+                const kickBtnY = rowY + (playerRowHeight - kickBtnH) / 2;
+
+                const kickBg = scene.add.graphics();
+                const drawKickBg = (color: number) => {
+                    kickBg.clear();
+                    kickBg.fillStyle(color, 1);
+                    kickBg.fillRoundedRect(kickBtnX, kickBtnY, kickBtnW, kickBtnH, 6);
+                };
+                drawKickBg(0xdc2626);
+                playerContainer.add(kickBg);
+
+                const kickLabel = scene.add.text(kickBtnX + kickBtnW / 2, kickBtnY + kickBtnH / 2, 'Kick', {
+                    fontSize: '12px',
+                    color: '#ffffff',
+                    fontStyle: 'bold'
+                }).setOrigin(0.5);
+                playerContainer.add(kickLabel);
+
+                const kickHitArea = scene.add.rectangle(kickBtnX, kickBtnY, kickBtnW, kickBtnH, 0xffffff, 0.001)
+                    .setOrigin(0, 0)
+                    .setInteractive({ useHandCursor: true });
+                playerContainer.add(kickHitArea);
+
+                kickHitArea.on('pointerdown', () => {
+                    options.onKick?.(entry.playerId);
+                });
+                kickHitArea.on('pointerover', () => drawKickBg(0xb91c1c));
+                kickHitArea.on('pointerout', () => drawKickBg(0xdc2626));
+            }
+
+            // row divider
+            const rowDivider = scene.add.graphics();
+            rowDivider.lineStyle(1, 0x1f2937, 0.6);
+            rowDivider.lineBetween(panelX + padding, rowY + playerRowHeight, panelX + panelWidth - padding, rowY + playerRowHeight);
+            playerContainer.add(rowDivider);
+
+            rowY += playerRowHeight;
+        });
+    };
+
+    buildPlayerRows(options.players);
+
+    // leave game btn
+    const leaveBtnW = panelWidth - padding * 2;
+    const leaveBtnH = leaveButtonHeight;
+    const leaveBtnX = panelX + padding;
+    const leaveBtnY = panelY + panelHeight - padding - leaveBtnH;
+
+    const leaveBg = scene.add.graphics();
+    const drawLeaveBg = (color: number) => {
+        leaveBg.clear();
+        leaveBg.fillStyle(color, 1);
+        leaveBg.fillRoundedRect(leaveBtnX, leaveBtnY, leaveBtnW, leaveBtnH, 8);
+    };
+    drawLeaveBg(0x991b1b);
+    container.add(leaveBg);
+
+    const leaveLabel = scene.add.text(leaveBtnX + leaveBtnW / 2, leaveBtnY + leaveBtnH / 2, 'Leave Game', {
+        fontSize: '15px',
+        color: '#ffffff',
+        fontStyle: 'bold'
+    }).setOrigin(0.5);
+    container.add(leaveLabel);
+
+    const leaveHitArea = scene.add.rectangle(leaveBtnX, leaveBtnY, leaveBtnW, leaveBtnH, 0xffffff, 0.001)
+        .setOrigin(0, 0)
+        .setInteractive({ useHandCursor: true });
+    container.add(leaveHitArea);
+
+    leaveHitArea.on('pointerdown', () => {
+        options.onLeave?.();
+    });
+    leaveHitArea.on('pointerover', () => drawLeaveBg(0x7f1d1d));
+    leaveHitArea.on('pointerout', () => drawLeaveBg(0x991b1b));
+
+    const panelBounds = new Phaser.Geom.Rectangle(panelX, panelY, panelWidth, panelHeight);
+
+    return {
+        container,
+        panelBounds,
+        refreshPlayers: buildPlayerRows,
+    };
+}
 
 export function createChatWindow(
     scene: Phaser.Scene,
@@ -783,6 +1221,16 @@ export function createBidBubble(
     existing?: Phaser.GameObjects.Container
 ): Phaser.GameObjects.Container {
     existing?.destroy();
+
+    const layout = getUILayout(scene);
+
+    // Mobile: bids are already shown inline in the pills / bottom bar,
+    // so return an empty (invisible) container to avoid cluttering the screen.
+    if (layout.isMobile) {
+        const container = scene.add.container(0, 0);
+        container.setVisible(false);
+        return container;
+    }
 
     const width = 56;
     const height = 32;
@@ -1100,31 +1548,55 @@ function showTrumpCardText(scene: Phaser.Scene, trumpCard: Card | null) {
     // On mobile, show between pills and trick area; on desktop, high up
     const centerY = layout.isMobile ? layout.pctH(15) : (layout.centerY - 260);
 
-    const prefix = 'The trump suit is ';
     const suitLabel = trumpCard.suit;
     const suitColorKey = CARD_SUIT_TO_COLOR[suitLabel];
     const isRedSuit = suitColorKey === CARD_SUIT_COLOR.RED;
     const suitColor = isRedSuit ? '#ef4444' : '#111111';
 
-    const mobileFontSize = Math.max(16, Math.round(layout.width / 22));
-    const prefixText = scene.add.text(0, 0, prefix, {
-        fontSize: `${layout.isMobile ? mobileFontSize : 25}px`,
-        color: '#ffffff',
-        fontStyle: 'bold'
-    }).setOrigin(0, 0.5);
+    if (layout.isMobile) {
+        // Mobile: compact "Trump: SUIT" shown initially in the center,
+        // then relocated above the hand after the animation finishes
+        const mobileFontSize = Math.max(18, Math.round(layout.width / 18));
+        const prefixText = scene.add.text(0, 0, 'Trump: ', {
+            fontSize: `${mobileFontSize}px`,
+            color: '#9aa0a6',
+            fontStyle: 'bold'
+        }).setOrigin(0, 0.5);
 
-    const suitText = scene.add.text(0, 0, suitLabel, {
-        fontSize: `${layout.isMobile ? mobileFontSize : 25}px`,
-        color: suitColor,
-        fontStyle: '900'
-    }).setOrigin(0, 0.5);
+        const suitText = scene.add.text(0, 0, suitLabel, {
+            fontSize: `${mobileFontSize}px`,
+            color: suitColor,
+            fontStyle: '900'
+        }).setOrigin(0, 0.5);
 
-    const totalWidth = prefixText.width + suitText.width;
-    prefixText.setX(-totalWidth / 2);
-    suitText.setX(-totalWidth / 2 + prefixText.width);
+        const totalWidth = prefixText.width + suitText.width;
+        prefixText.setX(-totalWidth / 2);
+        suitText.setX(-totalWidth / 2 + prefixText.width);
 
-    trumpCardText = scene.add.container(centerX, centerY, [prefixText, suitText]);
-    trumpCardText.setDepth(15);
+        trumpCardText = scene.add.container(centerX, centerY, [prefixText, suitText]);
+        trumpCardText.setDepth(15);
+    } else {
+        // Desktop: full sentence
+        const prefix = 'The trump suit is ';
+        const prefixText = scene.add.text(0, 0, prefix, {
+            fontSize: '25px',
+            color: '#ffffff',
+            fontStyle: 'bold'
+        }).setOrigin(0, 0.5);
+
+        const suitText = scene.add.text(0, 0, suitLabel, {
+            fontSize: '25px',
+            color: suitColor,
+            fontStyle: '900'
+        }).setOrigin(0, 0.5);
+
+        const totalWidth = prefixText.width + suitText.width;
+        prefixText.setX(-totalWidth / 2);
+        suitText.setX(-totalWidth / 2 + prefixText.width);
+
+        trumpCardText = scene.add.container(centerX, centerY, [prefixText, suitText]);
+        trumpCardText.setDepth(15);
+    }
 }
 
 export function moveDrawPileToTopLeft(
@@ -1140,20 +1612,54 @@ export function moveDrawPileToTopLeft(
     const deckScale = layout.isMobile ? getTrickCardScale(scene) : getCardScale(scene);
     const cardWidth = CARD_WIDTH * deckScale;
     const cardHeight = CARD_HEIGHT * deckScale;
-    const targetX = cardWidth / 2 + margin;
-    // On mobile, push below the pill badges
-    const targetY = cardHeight / 2 + margin + (layout.isMobile ? layout.pctH(8) : 0);
 
     scene.sound.play(ASSET_KEYS.AUDIO_TRUMP_MOVE);
 
+    if (layout.isMobile) {
+        // Mobile: fade out the draw pile — we don't need it cluttering the screen
+        drawPileCards.forEach((card) => {
+            scene.tweens.add({
+                targets: card,
+                alpha: 0,
+                duration: 300,
+                ease: 'Cubic.easeOut',
+                onComplete: () => card.setVisible(false)
+            });
+        });
+
+        // Move trump text to sit centered just above the player hand
+        if (trumpCardText) {
+            const bottomBarHeight = layout.pctH(9);
+            const handCardHeight = CARD_HEIGHT * getCardScale(scene);
+            const handTop = layout.height - bottomBarHeight - handCardHeight * 0.42 - handCardHeight * 0.5;
+            const textY = handTop - layout.pctH(2);
+
+            scene.tweens.add({
+                targets: trumpCardText,
+                x: layout.centerX,
+                y: textY,
+                scale: 0.85,
+                duration: 400,
+                ease: 'Cubic.easeOut'
+            });
+        }
+
+        // Return a dummy anchor (deck is hidden on mobile)
+        return { x: 0, y: 0 };
+    }
+
+    // Desktop: move deck to top-left as before
+    const targetX = cardWidth / 2 + margin;
+    const targetY = cardHeight / 2 + margin;
+
     if (trumpCardText) {
-        const textTargetX = layout.isMobile ? targetX + 50 : targetX + 80;
-        const textTargetY = layout.isMobile ? targetY + cardHeight * 0.8 : targetY + 90;
+        const textTargetX = targetX + 80;
+        const textTargetY = targetY + 90;
         scene.tweens.add({
             targets: trumpCardText,
             x: textTargetX,
             y: textTargetY,
-            scale: layout.isMobile ? 0.55 : 0.70,
+            scale: 0.70,
             duration: 300,
             ease: 'Cubic.easeOut'
         });
@@ -1185,8 +1691,14 @@ export function renderTrumpCardNextToDeck(
     existing?.destroy();
 
     const layout = getUILayout(scene);
+
+    // Mobile: no persistent trump card sprite — just the text label
+    if (layout.isMobile) {
+        return undefined;
+    }
+
     const margin = layout.safeSide;
-    const deckScale = layout.isMobile ? getTrickCardScale(scene) : getCardScale(scene);
+    const deckScale = getCardScale(scene);
     const cardWidth = CARD_WIDTH * deckScale;
     const x = deckPosition.x + cardWidth + margin;
     const y = deckPosition.y;
@@ -1257,17 +1769,30 @@ export function createRoundSummaryPanel(
     onContinue: () => void
 ): RoundSummaryPanel {
     const layout = getUILayout(scene);
-    const panelWidth = Math.min(layout.isMobile ? 340 : 380, layout.width - layout.safeSide * 2);
+    const panelWidth = Math.min(layout.isMobile ? layout.width - layout.pctW(8) : 380, layout.width - layout.safeSide * 2);
     const padding = 14;
     const headerHeight = 26;
-    const rowHeight = 22;
+    const rowHeight = layout.isMobile ? 26 : 22;
     const footerHeight = 54;
     const height = padding * 2 + headerHeight + rowHeight * (summary.results.length + 1) + footerHeight;
-    const x = scene.scale.width - panelWidth - layout.safeSide;
-    const y = scene.scale.height - height - layout.safeBottom;
+
+    // Mobile: center on screen; Desktop: bottom-right corner
+    const x = layout.isMobile
+        ? Math.round(layout.centerX - panelWidth / 2)
+        : scene.scale.width - panelWidth - layout.safeSide;
+    const y = layout.isMobile
+        ? Math.round(layout.centerY - height / 2)
+        : scene.scale.height - height - layout.safeBottom;
 
     const container = scene.add.container(x, y);
+    container.setDepth(100);
     const textNodes: Phaser.GameObjects.Text[] = [];
+
+    // Mobile: dim overlay behind the panel so it pops
+    if (layout.isMobile) {
+        const overlay = scene.add.rectangle(-x, -y, layout.width, layout.height, 0x000000, 0.55).setOrigin(0, 0);
+        container.add(overlay);
+    }
 
     const bg = scene.add.graphics();
     bg.fillStyle(0x1c1f26, 0.95);
@@ -1277,7 +1802,7 @@ export function createRoundSummaryPanel(
     container.add(bg);
 
     const title = scene.add.text(padding, padding, `Round ${summary.round} Results`, {
-        fontSize: '16px',
+        fontSize: layout.isMobile ? '18px' : '16px',
         color: '#ffffff',
         fontStyle: 'bold'
     });
@@ -1288,7 +1813,7 @@ export function createRoundSummaryPanel(
     const colTricks = Math.round(panelWidth * 0.57);
     const colPts = Math.round(panelWidth * 0.72);
     const colTotal = Math.round(panelWidth * 0.83);
-    const hdrFontSize = '12px';
+    const hdrFontSize = layout.isMobile ? '13px' : '12px';
     const header = scene.add.text(padding, currentY, 'Player', {
         fontSize: hdrFontSize,
         color: '#9aa0a6',
@@ -1305,7 +1830,7 @@ export function createRoundSummaryPanel(
     container.add(headerTotal);
 
     currentY += rowHeight;
-    const rowFontSize = '13px';
+    const rowFontSize = layout.isMobile ? '14px' : '13px';
     summary.results.forEach((result) => {
         const name = scene.add.text(padding, currentY, result.playerName, {
             fontSize: rowFontSize,
