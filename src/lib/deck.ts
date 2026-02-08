@@ -8,8 +8,8 @@ const SUITS: CardSuit[] = [CARD_SUIT.CLUB, CARD_SUIT.DIAMOND, CARD_SUIT.HEART, C
 const SUIT_OFFSET: Record<CardSuit, number> = {
     [CARD_SUIT.CLUB]: 0,
     [CARD_SUIT.DIAMOND]: 13,
-    [CARD_SUIT.SPADE]: 26,
-    [CARD_SUIT.HEART]: 39
+    [CARD_SUIT.HEART]: 26,
+    [CARD_SUIT.SPADE]: 39
 };
 
 export function createDeck(): Card[] {

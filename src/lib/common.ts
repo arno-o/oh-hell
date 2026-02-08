@@ -1,20 +1,51 @@
+export type MenuItemId = 'chat' | 'settings';
+
+export interface MenuItem {
+    id: MenuItemId;
+    icon: string;
+    label: string;
+}
+
+export const MENU_ITEMS: MenuItem[] = [
+    {
+        id: 'chat',
+        icon: 'icon-chat',
+        label: 'Chat'
+    },
+    {
+        id: 'settings',
+        icon: 'icon-settings',
+        label: 'Settings'
+    },
+];
+
 export const CARD_WIDTH = 37;
 export const CARD_HEIGHT = 52;
-export const CARD_BACK_FRAME = 52;
+export const CARD_SCALE = 2.5;
+export const CARD_BACK_FRAME = 53;
 
 export const ASSET_KEYS = {
-    TITLE: 'TITLE',
-    CLICK_TO_START: 'CLICK_TO_START',
-    CARDS: 'CARDS'
+    CARDS: 'CARDS',
+    AUDIO_BUTTON_1: 'AUDIO_BUTTON_1',
+    AUDIO_BUTTON_2: 'AUDIO_BUTTON_2',
+    AUDIO_BUTTON_3: 'AUDIO_BUTTON_3',
+    AUDIO_CARD_1: 'AUDIO_CARD_1',
+    AUDIO_CARD_2: 'AUDIO_CARD_2',
+    AUDIO_ROUND_WIN: 'AUDIO_ROUND_WIN',
+    AUDIO_TRICK_WIN: 'AUDIO_TRICK_WIN',
+    AUDIO_TRUMP_MOVE: 'AUDIO_TRUMP_MOVE',
+    AUDIO_CARD_SPREAD: 'AUDIO_CARD_SPREAD',
+    AUDIO_UI_CLICK: 'AUDIO_UI_CLICK',
+    AUDIO_CHAT_POST: 'AUDIO_CHAT_POST',
 } as const;
 
-export type CardSuit = keyof typeof CARD_SUIT;
+export type CardSuit = typeof CARD_SUIT[keyof typeof CARD_SUIT];
 
 export const CARD_SUIT = {
-    HEART: 'HEART',
-    DIAMOND: 'DIAMOND',
-    SPADE: 'SPADE',
-    CLUB: 'CLUB'
+    HEART: 'HEARTS',
+    DIAMOND: 'DIAMONDS',
+    SPADE: 'SPADES',
+    CLUB: 'CLUBS'
 } as const;
 
 export type CardValue = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13;
