@@ -5,6 +5,7 @@ import { MENU_ITEMS } from '@/lib/common';
 import { Card } from '@/lib/card';
 import { getCardFrame } from '@/lib/deck';
 import { CardSprite } from '@/lib/cardSprite';
+import { isSoundEnabled, setSoundEnabled } from '@/lib/settings';
 
 export type PlayerAnchorPosition = 'bottom' | 'left' | 'top' | 'right';
 
@@ -770,6 +771,301 @@ export type AlertToast = {
     container: Phaser.GameObjects.Container;
     height: number;
 };
+
+export type SettingsPlayerEntry = {
+    playerId: string;
+    playerName: string;
+    color: number;
+    isBot: boolean;
+};
+
+export type SettingsWindow = {
+    container: Phaser.GameObjects.Container;
+    panelBounds: Phaser.Geom.Rectangle;
+    // call to rebuild player rows (e.g. after a kick).
+    refreshPlayers: (players: SettingsPlayerEntry[]) => void;
+};
+
+export function createSettingsWindow(
+    scene: Phaser.Scene,
+    options: {
+        onClose: () => void;
+        isHost: boolean;
+        localPlayerId: string;
+        players: SettingsPlayerEntry[];
+        onKick?: (playerId: string) => void;
+        onLeave?: () => void;
+    }
+): SettingsWindow {
+    const layout = getUILayout(scene);
+    const maxWidth = layout.width - layout.safeSide * 2;
+    const maxHeight = layout.height - layout.safeTop - layout.safeBottom - 60;
+    const panelWidth = Math.min(layout.isMobile ? maxWidth : 400, maxWidth);
+    const padding = 18;
+    const headerHeight = 32;
+    const sectionGap = 18;
+    const toggleRowHeight = 44;
+    const playerRowHeight = 44;
+    const playerHeaderHeight = 28;
+    const leaveButtonHeight = 42;
+    const leaveButtonGap = 18;
+
+    // calculate panel height dynamically based on content
+    const playerSectionHeight = options.isHost
+        ? playerHeaderHeight + options.players.length * playerRowHeight + sectionGap
+        : 0;
+    const panelHeight = Math.min(
+        padding * 2 + headerHeight + sectionGap + toggleRowHeight + playerSectionHeight + leaveButtonGap + leaveButtonHeight + 12,
+        maxHeight
+    );
+
+    const panelX = Math.round(layout.centerX - panelWidth / 2);
+    const panelY = Math.round(layout.centerY - panelHeight / 2);
+
+    const container = scene.add.container(0, 0);
+    container.setDepth(130);
+
+    // dim overlay
+    const overlay = scene.add.rectangle(0, 0, layout.width, layout.height, 0x000000, 0.5).setOrigin(0, 0);
+    overlay.setInteractive(); // block clicks below
+    container.add(overlay);
+
+    // panel background
+    const panel = scene.add.graphics();
+    panel.fillStyle(0x111827, 0.97);
+    panel.lineStyle(2, 0x4b5563, 1);
+    panel.fillRoundedRect(panelX, panelY, panelWidth, panelHeight, 14);
+    panel.strokeRoundedRect(panelX, panelY, panelWidth, panelHeight, 14);
+    container.add(panel);
+
+    // header
+    const title = scene.add.text(panelX + padding, panelY + padding, 'Settings', {
+        fontSize: '18px',
+        color: '#f9fafb',
+        fontStyle: 'bold'
+    });
+    container.add(title);
+
+    const closeButton = scene.add.text(panelX + panelWidth - padding, panelY + padding - 2, '×', {
+        fontSize: '22px',
+        color: '#e5e7eb'
+    }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
+    closeButton.on('pointerdown', () => options.onClose());
+    container.add(closeButton);
+
+    // sound toggl
+    let currentY = panelY + padding + headerHeight + sectionGap;
+    const soundSectionLabel = scene.add.text(panelX + padding, currentY, 'Sound', {
+        fontSize: '15px',
+        color: '#d1d5db',
+        fontStyle: 'bold'
+    });
+    container.add(soundSectionLabel);
+
+    const toggleW = 50;
+    const toggleH = 26;
+    const toggleX = panelX + panelWidth - padding - toggleW;
+    const toggleY = currentY - 2;
+    const toggleRadius = toggleH / 2;
+
+    let soundEnabled = isSoundEnabled();
+
+    const toggleBg = scene.add.graphics();
+    const knobRadius = toggleH / 2 - 3;
+
+    const knob = scene.add.circle(0, 0, knobRadius, 0xffffff);
+    container.add(toggleBg);
+    container.add(knob);
+
+    const drawToggle = (enabled: boolean, animate = false) => {
+        const bgColor = enabled ? 0x10b981 : 0x4b5563;
+        toggleBg.clear();
+        toggleBg.fillStyle(bgColor, 1);
+        toggleBg.fillRoundedRect(toggleX, toggleY, toggleW, toggleH, toggleRadius);
+
+        const targetKnobX = enabled
+            ? toggleX + toggleW - knobRadius - 4
+            : toggleX + knobRadius + 4;
+        const knobY = toggleY + toggleH / 2;
+
+        if (animate) {
+            scene.tweens.add({ targets: knob, x: targetKnobX, y: knobY, duration: 140, ease: 'Cubic.easeOut' });
+        } else {
+            knob.setPosition(targetKnobX, knobY);
+        }
+    };
+
+    drawToggle(soundEnabled);
+
+    const toggleHitArea = scene.add.rectangle(toggleX, toggleY, toggleW, toggleH, 0xffffff, 0.001)
+        .setOrigin(0, 0)
+        .setInteractive({ useHandCursor: true });
+    container.add(toggleHitArea);
+
+    toggleHitArea.on('pointerdown', () => {
+        soundEnabled = !soundEnabled;
+        setSoundEnabled(soundEnabled);
+        scene.sound.mute = !soundEnabled;
+        drawToggle(soundEnabled, true);
+        if (soundEnabled) {
+            scene.sound.play(ASSET_KEYS.AUDIO_UI_CLICK, { volume: 0.4 });
+        }
+    });
+
+    currentY += toggleRowHeight + sectionGap;
+
+    // host only player actions
+    const playerContainer = scene.add.container(0, 0);
+    container.add(playerContainer);
+
+    const buildPlayerRows = (players: SettingsPlayerEntry[]) => {
+        playerContainer.removeAll(true);
+
+        if (!options.isHost) return;
+
+        const sectionLabel = scene.add.text(panelX + padding, currentY, 'Players', {
+            fontSize: '15px',
+            color: '#d1d5db',
+            fontStyle: 'bold'
+        });
+        playerContainer.add(sectionLabel);
+
+        const divider = scene.add.graphics();
+        divider.lineStyle(1, 0x374151, 0.8);
+        divider.lineBetween(panelX + padding, currentY + 22, panelX + panelWidth - padding, currentY + 22);
+        playerContainer.add(divider);
+
+        let rowY = currentY + playerHeaderHeight;
+
+        players.forEach((entry) => {
+            const isLocal = entry.playerId === options.localPlayerId;
+
+            // player color dot
+            const dot = scene.add.circle(panelX + padding + 6, rowY + playerRowHeight / 2, 5, entry.color);
+            playerContainer.add(dot);
+
+            // name
+            const nameLabel = scene.add.text(panelX + padding + 20, rowY + playerRowHeight / 2, entry.playerName, {
+                fontSize: '14px',
+                color: '#e5e7eb'
+            }).setOrigin(0, 0.5);
+            playerContainer.add(nameLabel);
+
+            // bot badge
+            if (entry.isBot) {
+                const badgeX = nameLabel.x + nameLabel.width + 8;
+                const badgeBg = scene.add.graphics();
+                badgeBg.fillStyle(0xffd24a, 1);
+                badgeBg.fillRoundedRect(badgeX, rowY + playerRowHeight / 2 - 8, 30, 16, 5);
+                playerContainer.add(badgeBg);
+
+                const badgeText = scene.add.text(badgeX + 15, rowY + playerRowHeight / 2, 'BOT', {
+                    fontSize: '9px',
+                    color: '#1a1a1a',
+                    fontStyle: 'bold'
+                }).setOrigin(0.5);
+                playerContainer.add(badgeText);
+            }
+
+            // "(You)" label
+            if (isLocal) {
+                const youLabel = scene.add.text(
+                    panelX + panelWidth - padding - (entry.isBot ? 0 : 0),
+                    rowY + playerRowHeight / 2,
+                    '(You)',
+                    { fontSize: '12px', color: '#6b7280' }
+                ).setOrigin(1, 0.5);
+                playerContainer.add(youLabel);
+            }
+
+            // kick button — only for non-local, non-bot players
+            if (!isLocal && !entry.isBot && options.isHost) {
+                const kickBtnW = 52;
+                const kickBtnH = 26;
+                const kickBtnX = panelX + panelWidth - padding - kickBtnW;
+                const kickBtnY = rowY + (playerRowHeight - kickBtnH) / 2;
+
+                const kickBg = scene.add.graphics();
+                const drawKickBg = (color: number) => {
+                    kickBg.clear();
+                    kickBg.fillStyle(color, 1);
+                    kickBg.fillRoundedRect(kickBtnX, kickBtnY, kickBtnW, kickBtnH, 6);
+                };
+                drawKickBg(0xdc2626);
+                playerContainer.add(kickBg);
+
+                const kickLabel = scene.add.text(kickBtnX + kickBtnW / 2, kickBtnY + kickBtnH / 2, 'Kick', {
+                    fontSize: '12px',
+                    color: '#ffffff',
+                    fontStyle: 'bold'
+                }).setOrigin(0.5);
+                playerContainer.add(kickLabel);
+
+                const kickHitArea = scene.add.rectangle(kickBtnX, kickBtnY, kickBtnW, kickBtnH, 0xffffff, 0.001)
+                    .setOrigin(0, 0)
+                    .setInteractive({ useHandCursor: true });
+                playerContainer.add(kickHitArea);
+
+                kickHitArea.on('pointerdown', () => {
+                    options.onKick?.(entry.playerId);
+                });
+                kickHitArea.on('pointerover', () => drawKickBg(0xb91c1c));
+                kickHitArea.on('pointerout', () => drawKickBg(0xdc2626));
+            }
+
+            // row divider
+            const rowDivider = scene.add.graphics();
+            rowDivider.lineStyle(1, 0x1f2937, 0.6);
+            rowDivider.lineBetween(panelX + padding, rowY + playerRowHeight, panelX + panelWidth - padding, rowY + playerRowHeight);
+            playerContainer.add(rowDivider);
+
+            rowY += playerRowHeight;
+        });
+    };
+
+    buildPlayerRows(options.players);
+
+    // leave game btn
+    const leaveBtnW = panelWidth - padding * 2;
+    const leaveBtnH = leaveButtonHeight;
+    const leaveBtnX = panelX + padding;
+    const leaveBtnY = panelY + panelHeight - padding - leaveBtnH;
+
+    const leaveBg = scene.add.graphics();
+    const drawLeaveBg = (color: number) => {
+        leaveBg.clear();
+        leaveBg.fillStyle(color, 1);
+        leaveBg.fillRoundedRect(leaveBtnX, leaveBtnY, leaveBtnW, leaveBtnH, 8);
+    };
+    drawLeaveBg(0x991b1b);
+    container.add(leaveBg);
+
+    const leaveLabel = scene.add.text(leaveBtnX + leaveBtnW / 2, leaveBtnY + leaveBtnH / 2, 'Leave Game', {
+        fontSize: '15px',
+        color: '#ffffff',
+        fontStyle: 'bold'
+    }).setOrigin(0.5);
+    container.add(leaveLabel);
+
+    const leaveHitArea = scene.add.rectangle(leaveBtnX, leaveBtnY, leaveBtnW, leaveBtnH, 0xffffff, 0.001)
+        .setOrigin(0, 0)
+        .setInteractive({ useHandCursor: true });
+    container.add(leaveHitArea);
+
+    leaveHitArea.on('pointerdown', () => {
+        options.onLeave?.();
+    });
+    leaveHitArea.on('pointerover', () => drawLeaveBg(0x7f1d1d));
+    leaveHitArea.on('pointerout', () => drawLeaveBg(0x991b1b));
+
+    const panelBounds = new Phaser.Geom.Rectangle(panelX, panelY, panelWidth, panelHeight);
+
+    return {
+        container,
+        panelBounds,
+        refreshPlayers: buildPlayerRows,
+    };
+}
 
 export function createChatWindow(
     scene: Phaser.Scene,
