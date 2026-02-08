@@ -1,5 +1,6 @@
 import { Scene } from 'phaser';
 import { AlertToast, animateTrumpSelection, ChatWindow, createDrawPile, createMenuButtons, createOtherPlayersUI, createPlayerUI, createRoundSummaryPanel, moveDrawPileToTopLeft, PlayerAnchor, renderPlayerHand, renderTrickCards, renderTrumpCardNextToDeck, RoundSummaryData } from '@/lib/ui';
+import { getUILayout } from '@/lib/layout';
 import { ASSET_KEYS } from '@/lib/common';
 import { Card, createDeck, shuffleDeck } from '@/lib/deck';
 import { getParticipants, getState, isHost, myPlayer, onPlayerJoin, PlayerState, setState } from 'playroomkit';
@@ -131,6 +132,9 @@ export class Game extends Scene {
                 this.checkGameOverAlert();
             }
         });
+
+        this.applyLayoutMetrics();
+        this.scale.on(Phaser.Scale.Events.RESIZE, this.handleResize, this);
     }
 
     shutdown() {
@@ -147,7 +151,39 @@ export class Game extends Scene {
             this.pollTimer.remove(false);
             this.pollTimer = undefined;
         }
+        this.scale.off(Phaser.Scale.Events.RESIZE, this.handleResize, this);
         this.events.off(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this);
+    }
+
+    private applyLayoutMetrics(): void {
+        const layout = getUILayout(this);
+        this.alertBaseY = layout.safeTop + Math.round(40 * layout.scale);
+        this.alertGap = Math.round(12 * layout.scale);
+        if (this.activeAlerts.length) {
+            this.positionAlerts();
+        }
+    }
+
+    private handleResize(): void {
+        this.applyLayoutMetrics();
+
+        if (this.myHand.length) {
+            this.handSprites = renderPlayerHand(this, this.myHand, this.handSprites);
+            attachHandInteractions(this);
+            updatePlayableCards(this);
+        }
+
+        const trickCards = (getState('trickCards') as Array<{ playerId: string; card: SerializedCard }> | undefined) ?? [];
+        if (trickCards.length) {
+            const localId = myPlayer().id;
+            const cardsWithPositions = trickCards.map((entry) => {
+                const [card] = deserializeCards([entry.card]);
+                const anchor = this.playerAnchors[entry.playerId];
+                const position = entry.playerId === localId ? 'bottom' : (anchor?.position ?? 'top');
+                return { card, position };
+            });
+            this.trickSprites = renderTrickCards(this, cardsWithPositions, this.trickSprites);
+        }
     }
 
     runGameSetup(scene: Phaser.Scene): void {
